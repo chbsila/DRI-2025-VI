@@ -1,3 +1,10 @@
+# ============================================================
+# Set Working Directory to Existing DRI Folder
+# ============================================================
+save_dir <- "~/Desktop/DRI"   # <-- Change path if DRI is in another location
+setwd(save_dir)               # Set working directory
+cat("Saving all results to:", getwd(), "\n")  # Confirm path in console
+
 # ------------------------------------------------------------
 # Coordinate Ascent Variational Inference (CAVI) Algorithm
 # for Laplace Spike-and-Slab in High-Dimensional Linear Regression
