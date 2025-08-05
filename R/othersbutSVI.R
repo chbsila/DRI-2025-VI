@@ -106,12 +106,12 @@ for (config in configurations) {
       } else if (method == "SSLASSO") {
         fit <- SSLASSO(X = sim$X, y = sim$Y, family = "gaussian")
         mu <- as.vector(coef(fit)[-1])
-        gamma <- ifelse(abs(mu) > 1e-6, 1, 0)
+        gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
         
       } else if (method == "ebreg") {
         fit <- ebreg(X = sim$X, y = sim$Y)
         mu <- fit$PosteriorMean
-        gamma <- ifelse(abs(mu) > 1e-6, 1, 0)
+        gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
       }
       
       # ------------------------
