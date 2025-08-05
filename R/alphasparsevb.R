@@ -1,18 +1,18 @@
-# ============================================================
-# Set Working Directory to Existing DRI Folder
-# ============================================================
-save_dir <- "~/Desktop/DRI"   
-setwd(save_dir)
-cat("Saving all results to:", getwd(), "\n")
-
 # ------------------------------------------------------------
 # Coordinate Ascent Variational Inference (CAVI) Algorithm
 # for Laplace Spike-and-Slab in High-Dimensional Linear Regression
-# with Rényi Divergence
+# with Rényi Divergence (Optimized Simulations)
 #
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
 # ------------------------------------------------------------
+
+# ============================================================
+# Set Working Directory
+# ============================================================
+save_dir <- "~/Desktop/DRI"   
+setwd(save_dir)
+cat("Saving all results to:", getwd(), "\n")
 
 # ============================================================
 # Libraries
@@ -23,13 +23,13 @@ library(glmnet)
 library(tidyr)
 library(dplyr)
 library(doMC)
-library(progress)   # For progress bars
-library(tictoc)     # For profiling runtime
+library(progress)   # Progress bars
+library(tictoc)     # Runtime profiling
 
 # ============================================================
-# Parallel Backend Setup
+# Parallel Setup
 # ============================================================
-registerDoMC(cores = parallel::detectCores() - 1)  # Use all but one core
+registerDoMC(cores = parallel::detectCores() - 1)
 
 # ============================================================
 # Global Constants
@@ -54,7 +54,7 @@ simulate <- function(n, p, s) {
 safe_sum <- function(x) if (length(x) == 0) 0 else sum(x)
 
 # ============================================================
-# Helper Functions (Core Components)
+# Helper Functions (A_i, B_i, C_i, etc.)
 # ============================================================
 A_i_mu <- function(mu_i, X, Y, mu, sigma1, gamma, lambda, i, p, XtX, YtX) {
   sum_j <- if (p > 1) safe_sum(gamma[-i] * mu[-i] * XtX[-i, i]) else 0
@@ -209,19 +209,27 @@ configurations <- list(
 )
 
 # ============================================================
-# Parallel Run with Progress Bar + Median Metrics
+# Optimized Run: Shared Simulations Per Config
 # ============================================================
 results <- list()
-tic("Total runtime")  # Start profiling total time
+tic("Total runtime")
 
 for (config in configurations) {
+  cat("\n=== Running configuration:", config$name, "===\n")
+  
+  # Generate simulations ONCE
+  sims <- vector("list", number_of_simulations)
+  for (i in 1:number_of_simulations) {
+    sims[[i]] <- simulate(config$n, config$p, config$s)
+  }
+  
   for (a in a_values) {
-    cat("\nRunning:", config$name, "| Alpha:", a, "\n")
+    cat("\nAlpha:", a, "\n")
     pb <- progress_bar$new(total = number_of_simulations, format = "[:bar] :percent ETA: :eta")
     
     metrics_list <- foreach(sim_idx = 1:number_of_simulations, .combine = bind_rows) %do% {
       pb$tick()
-      sim <- simulate(config$n, config$p, config$s)
+      sim <- sims[[sim_idx]]
       fit <- suppressWarnings(rvi.fit(sim$X, sim$Y, a, prior_scale = 1))
       compute_metrics(fit$mu, fit$sigma1, fit$gamma, sim$theta, sim$X, sim$Y)
     }
@@ -241,5 +249,5 @@ for (config in configurations) {
 }
 
 results <- bind_rows(results)
-write.csv(results, "DRI_results.csv")
-toc()  # End profiling total time
+write.csv(results, "DRI_results_optimized.csv")
+toc() #end profiling total time
