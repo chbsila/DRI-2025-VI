@@ -231,25 +231,3 @@ results <- foreach(config = configurations, .combine = bind_rows) %:%
   }
 
 write.csv(results, "DRI_results.csv")
-
-# ============================================================
-# Plotting: Mean ± SD
-# ============================================================
-results_long <- results %>%
-  pivot_longer(cols = c("TPR_mean", "FDR_mean", "L2_mean", "MSPE_mean",
-                        "TPR_sd", "FDR_sd", "L2_sd", "MSPE_sd"),
-               names_to = c("Metric", "Stat"), names_sep = "_") %>%
-  pivot_wider(names_from = Stat, values_from = value)
-
-ggplot(results_long, aes(x = a, y = mean, color = config, group = config)) +
-  geom_line(size = 1.2) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), width = 0.1) +
-  facet_wrap(~ Metric, scales = "free_y") +
-  labs(
-    title = paste("Performance Metrics by Configuration (", number_of_simulations, " sims)", sep = ""),
-    x = "Alpha (a)",
-    y = "Metric Value",
-    color = "Configuration"
-  ) +
-  theme_minimal(base_size = 14)
