@@ -35,13 +35,13 @@ registerDoMC(cores = parallel::detectCores() - 1)
 # Global Constants
 # ============================================================
 eps_safe <- 1e-7
-number_of_simulations <- 100
+number_of_simulations <- 10
 
 # ============================================================
 # Simulation Function
 # ============================================================
 simulate <- function(n, p, s) {
-  X <- matrix(rnorm(n * p), n, p)
+  X <- matrix(rnorm(n * p, mean = 0), n, p)
   theta <- numeric(p)
   theta[sample.int(p, s)] <- runif(s, -3, 3)
   Y <- X %*% theta + rnorm(n)
@@ -150,6 +150,12 @@ rvi.fit <- function(X, Y, a, prior_scale = 1) {
   gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
   sigma1 <- rep(1, p)
   
+  
+  #Empirical Bayes with interval bounds
+  upper_bound = max(mu) + max(sigma1)
+  lower_bound = min(mu) - max(sigma1)
+  sigma_upper_bound = max(sigma1) + 1
+  
   alpha_h <- sum(gamma)
   beta_h <- max(p - alpha_h, eps)
   
@@ -161,10 +167,10 @@ rvi.fit <- function(X, Y, a, prior_scale = 1) {
     for (i in update_order) {
       mu[i] <- tryCatch(
         optimize(f = function(m) kappa_mu(m, X, Y, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
-                 interval = c(-3, 3))$minimum, error = function(e) mu[i])
+                 interval = c(lower_bound, upper_bound))$minimum, error = function(e) mu[i])
       sigma1[i] <- tryCatch(
         optimize(f = function(s) kappa_sigma(s, X, Y, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
-                 interval = c(1e-7, 100))$minimum, error = function(e) sigma1[i])
+                 interval = c(1e-7, sigma_upper_bound))$minimum, error = function(e) sigma1[i])
       
       Gamma_i <- log((alpha_h + eps) / (beta_h + eps)) + log(sqrt(pi) * sigma1[i] * prior_scale / sqrt(2)) +
         YtX[i] * mu[i] - safe_sum((XtX[i, -i]) * gamma[-i] * mu[-i]) -
@@ -175,7 +181,13 @@ rvi.fit <- function(X, Y, a, prior_scale = 1) {
       gamma[i] <- 1 / (1 + exp(-Gamma_i))
       if (!is.finite(gamma[i])) gamma[i] <- eps
     }
+    
+    #Empirical Bayes
+    upper_bound = max(mu) + max(sigma1)
+    lower_bound = min(mu) - max(sigma1)
+    sigma_upper_bound = max(sigma1) + 1
     alpha_h <- sum(gamma); beta_h <- max(p - alpha_h, eps)
+    
     k <- k + 1
     deltav <- delta(gamma_old, gamma)
   }
@@ -189,7 +201,7 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
   n <- nrow(X)
   posterior_mean <- mu * gamma
   pos_TR <- as.numeric(theta != 0)
-  pos <- as.numeric(gamma > 0.5)
+  pos <- as.numeric(gamma > 0.5) #threshhold
   TPR <- if (sum(pos_TR) > 0) sum((pos == 1) & (pos_TR == 1)) / sum(pos_TR) else 0
   FDR <- if (sum(pos) > 0) sum((pos == 1) & (pos_TR == 0)) / sum(pos) else 0
   L2  <- sqrt(sum((posterior_mean - theta)^2))
@@ -200,12 +212,9 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
 # ============================================================
 # Experiment Configurations
 # ============================================================
-a_values <- c(1.1, 1.2, 1.3, 1.5, 2, 3, 5, 10)
+a_values <- c(1.1, 1.2, 1.3, 1.5, 2, 3, 5, 100)
 configurations <- list(
-  list(name = "(i)",    n = 100,  p = 200,   s = 10),
-  list(name = "(ii)",   n = 400,  p = 1000,  s = 40),
-  list(name = "(iii)",  n = 200,  p = 800,   s = 5),
-  list(name = "(iv)",   n = 300,  p = 2000,  s = 20)
+  list(name = "(i)",    n = 100,  p = 200,   s = 10), list(name = "(ii)",   n = 400,  p = 1000,  s = 40), list(name = "(iii)",  n = 200,  p = 800,   s = 5), list(name = "(iv)",   n = 300,  p = 450,  s = 20)
 )
 
 # ============================================================
@@ -236,10 +245,10 @@ for (config in configurations) {
     
     metrics_summary <- metrics_list %>%
       summarise(
-        TPR_median = median(TPR, na.rm = TRUE), TPR_IQR = IQR(TPR, na.rm = TRUE),
-        FDR_median = median(FDR, na.rm = TRUE), FDR_IQR = IQR(FDR, na.rm = TRUE),
-        L2_median  = median(L2, na.rm = TRUE),  L2_IQR  = IQR(L2, na.rm = TRUE),
-        MSPE_median= median(MSPE, na.rm = TRUE), MSPE_IQR= IQR(MSPE, na.rm = TRUE)
+        TPR_median = mean(TPR, na.rm = TRUE), TPR_SD = sd(TPR, na.rm = TRUE),
+        FDR_median = mean(FDR, na.rm = TRUE), FDR_SD = sd(FDR, na.rm = TRUE),
+        L2_median  = mean(L2, na.rm = TRUE),  L2_SD  = sd(L2, na.rm = TRUE),
+        MSPE_median= mean(MSPE, na.rm = TRUE), MSPE_SD= sd(MSPE, na.rm = TRUE)
       ) %>%
       mutate(config = config$name, a = a, number_of_simulations = number_of_simulations)
     
@@ -249,5 +258,5 @@ for (config in configurations) {
 }
 
 results <- bind_rows(results)
-write.csv(results, "DRI_results_optimized.csv")
+write.csv(results, "DRI_results.csv")
 toc() #end profiling total time
