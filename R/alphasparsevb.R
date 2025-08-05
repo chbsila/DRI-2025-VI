@@ -1,7 +1,7 @@
 # ------------------------------------------------------------
 # Coordinate Ascent Variational Inference (CAVI) Algorithm
 # for Laplace Spike-and-Slab in High-Dimensional Linear Regression
-# with Rényi Divergence (Optimized Simulations)
+# with Rényi Divergence 
 #
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
