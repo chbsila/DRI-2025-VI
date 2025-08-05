@@ -1,3 +1,10 @@
+# ============================================================
+# Set Working Directory to Existing DRI Folder
+# ============================================================
+save_dir <- "~/Desktop/Other Methods"   
+setwd(save_dir)
+cat("Saving all results to:", getwd(), "\n")
+
 # ------------------------------------------------------------
 # Metrics Summary for other Bayesian Methods (Excluding SVI): 
 # SSLASSO, ebreg, sparsevb
@@ -23,7 +30,6 @@ library(tictoc)     # For profiling runtime
 # ============================================================
 number_of_simulations <- 100
 
-
 # ============================================================
 # Simulation Function
 # ============================================================
@@ -35,7 +41,10 @@ simulate <- function(n, p, s) {
   list(X = X, Y = Y, theta = theta)
 }
 
-compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
+# ============================================================
+# Metrics Computation
+# ============================================================
+compute_metrics <- function(mu, gamma, theta, X, Y) {
   n <- nrow(X)
   posterior_mean <- mu * gamma
   pos_TR <- as.numeric(theta != 0)
@@ -50,7 +59,6 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
 # ============================================================
 # Experiment Configurations
 # ============================================================
-a_values <- c(0.1, 0.2, 0.25, 0.5, 0.9, 1.1, 1.2, 1.3, 1.5, 2, 3, 5, 10)
 configurations <- list(
   list(name = "(i)",    n = 100,  p = 200,   s = 10),
   list(name = "(ii)",   n = 400,  p = 1000,  s = 40),
@@ -58,46 +66,81 @@ configurations <- list(
   list(name = "(iv)",   n = 300,  p = 2000,  s = 20)
 )
 
-# ============================================================
-# Parallel Run with Progress Bar + Median Metrics
-# ============================================================
+methods <- c("sparsevb", "SSLASSO", "ebreg")
 results <- list()
-tic("Total runtime")  # Start profiling total time
 
-m <- 0
+# ============================================================
+# Optimized Run: Shared Simulations Per Config
+# ============================================================
+tic("Total runtime")
 
 for (config in configurations) {
-  while (m < number_of_simulations){
-    sim <- simulate(config$n, config$p, config$s)
-    for (a in a_values) {
-      cat("\nRunning:", config$name, "| Alpha:", a, "\n")
-      pb <- progress_bar$new(total = number_of_simulations, format = "[:bar] :percent ETA: :eta")
-      metrics_list <- foreach(sim_idx = 1:number_of_simulations, .combine = bind_rows) %do% {
-      pb$tick()
-      sim <- simulate(config$n, config$p, config$s)
-      fit <- suppressWarnings(svb.fit(sim$X, sim$Y, family="linear", slab = "laplace", sigma= rep(1,ncol(sim$X)), prior_scale = 1)) #sparsevb fit
-      # try fit with other methods
-      # run compute metrics on each method fit and this simulation
-      compute_metrics(fit$mu, fit$sigma1, fit$gamma, sim$theta, sim$X, sim$Y)
-      }
-      #concatenate things that go together
-    
+  cat("\n=== Running configuration:", config$name, "===\n")
+  
+  # Generate simulations ONCE for this configuration
+  sims <- vector("list", number_of_simulations)
+  for (i in 1:number_of_simulations) {
+    sims[[i]] <- simulate(config$n, config$p, config$s)
   }
+  
+  for (method in methods) {
+    cat("\nMethod:", method, "\n")
+    pb <- progress_bar$new(total = number_of_simulations, format = paste(method, " [:bar] :percent ETA: :eta"))
     
-    metrics_summary <- metrics_list %>%
+    metrics_list <- vector("list", number_of_simulations)
+    
+    for (sim_idx in 1:number_of_simulations) {
+      pb$tick()
+      sim <- sims[[sim_idx]]  # Reuse pre-generated simulation
+      
+      # ------------------------
+      # Fit each method
+      # ------------------------
+      if (method == "sparsevb") {
+        fit <- svb.fit(sim$X, sim$Y, family = "linear", slab = "laplace",
+                       sigma = rep(1, ncol(sim$X)), prior_scale = 1)
+        mu <- fit$mu
+        gamma <- fit$gamma
+        
+      } else if (method == "SSLASSO") {
+        fit <- SSLASSO(X = sim$X, y = sim$Y, family = "gaussian")
+        mu <- as.vector(coef(fit)[-1])
+        gamma <- ifelse(abs(mu) > 1e-6, 1, 0)
+        
+      } else if (method == "ebreg") {
+        fit <- ebreg(X = sim$X, y = sim$Y)
+        mu <- fit$PosteriorMean
+        gamma <- ifelse(abs(mu) > 1e-6, 1, 0)
+      }
+      
+      # ------------------------
+      # Compute metrics
+      # ------------------------
+      metrics_list[[sim_idx]] <- compute_metrics(mu, gamma, sim$theta, sim$X, sim$Y)
+    }
+    
+    # Combine metrics
+    metrics_df <- bind_rows(metrics_list)
+    
+    # Median + IQR summary
+    metrics_summary <- metrics_df %>%
       summarise(
         TPR_median = median(TPR, na.rm = TRUE), TPR_IQR = IQR(TPR, na.rm = TRUE),
         FDR_median = median(FDR, na.rm = TRUE), FDR_IQR = IQR(FDR, na.rm = TRUE),
         L2_median  = median(L2, na.rm = TRUE),  L2_IQR  = IQR(L2, na.rm = TRUE),
         MSPE_median= median(MSPE, na.rm = TRUE), MSPE_IQR= IQR(MSPE, na.rm = TRUE)
       ) %>%
-      mutate(config = config$name, a = a, number_of_simulations = number_of_simulations)
+      mutate(config = config$name, method = method,
+             number_of_simulations = number_of_simulations)
     
-    write.csv(metrics_summary, paste0("results_", a, "_", config$name, ".csv"))
+    # Save individual method result
+    write.csv(metrics_summary, paste0("results_", method, "_", config$name, ".csv"), row.names = FALSE)
     results <- append(results, list(metrics_summary))
   }
 }
 
+# Combine all summaries
 results <- bind_rows(results)
-write.csv(results, "DRI_results.csv")
-toc()  # End profiling total time
+write.csv(results, "DRI_results_other_methods_optimized.csv", row.names = FALSE)
+
+toc()
