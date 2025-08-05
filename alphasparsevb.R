@@ -5,6 +5,15 @@ save_dir <- "~/Desktop/DRI"
 setwd(save_dir)
 cat("Saving all results to:", getwd(), "\n")
 
+# ------------------------------------------------------------
+# Coordinate Ascent Variational Inference (CAVI) Algorithm
+# for Laplace Spike-and-Slab in High-Dimensional Linear Regression
+# with Rényi Divergence
+#
+# Authors: Chadi Bsila, Kevin Wang, Annie Tang
+# Supported by: DRI 2025
+# ------------------------------------------------------------
+
 # ============================================================
 # Libraries
 # ============================================================
