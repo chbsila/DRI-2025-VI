@@ -147,7 +147,7 @@ rvi.fit <- function(X, Y, a, prior_scale = 1) {
   
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
-  gamma <- ifelse(abs(mu) > 1, 1, 0)
+  gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
   sigma1 <- rep(1, p)
   
   alpha_h <- sum(gamma)
@@ -173,7 +173,7 @@ rvi.fit <- function(X, Y, a, prior_scale = 1) {
         prior_scale * mu[i] * (1 - 2 * pnorm(-mu[i] / sigma1[i])) + 0.5
       
       gamma[i] <- 1 / (1 + exp(-Gamma_i))
-      if (!is.finite(gamma[i])) gamma[i] <- 0.5
+      if (!is.finite(gamma[i])) gamma[i] <- eps
     }
     alpha_h <- sum(gamma); beta_h <- max(p - alpha_h, eps)
     k <- k + 1
