@@ -1,9 +1,3 @@
-# ============================================================
-# Set Working Directory to Existing DRI Folder
-# ============================================================
-save_dir <- "~/Desktop/Other Methods"   
-setwd(save_dir)
-cat("Saving all results to:", getwd(), "\n")
 
 # ------------------------------------------------------------
 # Metrics Summary for other Bayesian Methods (Excluding SVI): 
@@ -12,6 +6,13 @@ cat("Saving all results to:", getwd(), "\n")
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
 # ------------------------------------------------------------
+
+# ============================================================
+# Set Working Directory to Existing DRI Folder
+# ============================================================
+save_dir <- "~/Desktop/Other Methods"   
+setwd(save_dir)
+cat("Saving all results to:", getwd(), "\n")
 
 # ============================================================
 # Libraries
