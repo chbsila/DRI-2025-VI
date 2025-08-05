@@ -24,7 +24,7 @@ library(tidyr)
 library(dplyr)
 library(doMC)
 library(progress)   # Progress bars
-library(tictoc)     # Runtime profiling
+library(tictoc)     # Run-time profiling
 
 # ============================================================
 # Parallel Setup
@@ -35,7 +35,7 @@ registerDoMC(cores = parallel::detectCores() - 1)
 # Global Constants
 # ============================================================
 eps_safe <- 1e-7
-number_of_simulations <- 10
+number_of_simulations <- 100
 
 # ============================================================
 # Simulation Function
@@ -140,14 +140,14 @@ delta <- function(g_old, g_new) {
 # ============================================================
 rvi.fit <- function(X, Y, a, prior_scale = 1) {
   n <- nrow(X); p <- ncol(X)
-  XtX <- t(X) %*% X
+  XtX <- t(X) %*% X #should be outside for faster computation
   YtX <- t(Y) %*% X
   eps <- 1e-7
   max_iterations <- 100
   
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
-  gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
+  gamma <- ifelse(abs(mu) > 1, 1, 0)
   sigma1 <- rep(1, p)
   
   
@@ -157,7 +157,7 @@ rvi.fit <- function(X, Y, a, prior_scale = 1) {
   sigma_upper_bound = max(sigma1) + 1
   
   alpha_h <- sum(gamma)
-  beta_h <- max(p - alpha_h, eps)
+  beta_h <- p - alpha_h
   
   update_order <- order(abs(mu), decreasing = TRUE)
   k <- 1; deltav <- 1
@@ -172,21 +172,15 @@ rvi.fit <- function(X, Y, a, prior_scale = 1) {
         optimize(f = function(s) kappa_sigma(s, X, Y, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
                  interval = c(1e-7, sigma_upper_bound))$minimum, error = function(e) sigma1[i])
       
-      Gamma_i <- log((alpha_h + eps) / (beta_h + eps)) + log(sqrt(pi) * sigma1[i] * prior_scale / sqrt(2)) +
-        YtX[i] * mu[i] - safe_sum((XtX[i, -i]) * gamma[-i] * mu[-i]) -
-        0.5 * XtX[i, i] * (sigma1[i]^2 + mu[i]^2) -
-        prior_scale * sigma1[i] * sqrt(2 / pi) * exp(-mu[i]^2 / (2 * sigma1[i]^2)) -
-        prior_scale * mu[i] * (1 - 2 * pnorm(-mu[i] / sigma1[i])) + 0.5
-      
-      gamma[i] <- 1 / (1 + exp(-Gamma_i))
-      if (!is.finite(gamma[i])) gamma[i] <- eps
+      Gamma_i <- log(alpha_h / beta_h) + log(sqrt(pi) * sigma1[i] * prior_scale / sqrt(2)) + YtX[i] * mu[i] - mu[i] * sum((XtX[i, -i]) * gamma[-i] * mu[-i]) -0.5 * XtX[i, i] * (sigma1[i]^2 + mu[i]^2) -
+        prior_scale * sigma1[i] * sqrt(2 / pi) * exp(-mu[i]^2 / (2 * sigma1[i]^2)) - prior_scale * mu[i] * (1 - 2 * pnorm(-mu[i] / sigma1[i])) +0.5
+      gamma[i] <- 1 / (1 + exp(-Gamma_i))  # logit inverse
     }
-    
     #Empirical Bayes
     upper_bound = max(mu) + max(sigma1)
     lower_bound = min(mu) - max(sigma1)
     sigma_upper_bound = max(sigma1) + 1
-    alpha_h <- sum(gamma); beta_h <- max(p - alpha_h, eps)
+    alpha_h <- sum(gamma); beta_h <- p - alpha_h
     
     k <- k + 1
     deltav <- delta(gamma_old, gamma)
@@ -201,20 +195,19 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
   n <- nrow(X)
   posterior_mean <- mu * gamma
   pos_TR <- as.numeric(theta != 0)
-  pos <- as.numeric(gamma > 0.5) #threshhold
-  TPR <- if (sum(pos_TR) > 0) sum((pos == 1) & (pos_TR == 1)) / sum(pos_TR) else 0
-  FDR <- if (sum(pos) > 0) sum((pos == 1) & (pos_TR == 0)) / sum(pos) else 0
-  L2  <- sqrt(sum((posterior_mean - theta)^2))
-  MSPE <- sqrt(sum((X %*% posterior_mean - Y)^2) / n)
+  pos <- as.numeric(gamma > 0.5) 
+  TPR <- sum((pos == 1) & (pos_TR == 1)) / sum(pos_TR)                 # True Positive Rate
+  FDR <- sum((pos == 1) & (pos_TR == 0)) / max(sum(pos), 1)            # False Discovery Rate
+  L2 <- sqrt(sum((posterior_mean - theta)^2))                          # L2 error
+  MSPE <- sqrt(sum((X %*% posterior_mean - Y)^2) / n)                  # Prediction error
   data.frame(TPR, FDR, L2, MSPE)
 }
 
 # ============================================================
 # Experiment Configurations
 # ============================================================
-a_values <- c(1.1, 1.2, 1.3, 1.5, 2, 3, 5, 100)
-configurations <- list(
-  list(name = "(i)",    n = 100,  p = 200,   s = 10), list(name = "(ii)",   n = 400,  p = 1000,  s = 40), list(name = "(iii)",  n = 200,  p = 800,   s = 5), list(name = "(iv)",   n = 300,  p = 450,  s = 20)
+a_values <- c(1.01, 1.1, 1.2, 1.3, 1.5, 2, 3, 5, 100)
+configurations <- list(list(name = "(i)",  n = 100,  p = 200,   s = 10), list(name = "(ii)",   n = 400,  p = 1000,  s = 40), list(name = "(iii)",  n = 200,  p = 800,   s = 5), list(name = "(iv)",   n = 300,  p = 450,  s = 20)
 )
 
 # ============================================================
@@ -245,10 +238,10 @@ for (config in configurations) {
     
     metrics_summary <- metrics_list %>%
       summarise(
-        TPR_median = mean(TPR, na.rm = TRUE), TPR_SD = sd(TPR, na.rm = TRUE),
-        FDR_median = mean(FDR, na.rm = TRUE), FDR_SD = sd(FDR, na.rm = TRUE),
-        L2_median  = mean(L2, na.rm = TRUE),  L2_SD  = sd(L2, na.rm = TRUE),
-        MSPE_median= mean(MSPE, na.rm = TRUE), MSPE_SD= sd(MSPE, na.rm = TRUE)
+        TPR_mean = mean(TPR, na.rm = TRUE), TPR_SD = sd(TPR, na.rm = TRUE),
+        FDR_mean = mean(FDR, na.rm = TRUE), FDR_SD = sd(FDR, na.rm = TRUE),
+        L2_mean  = mean(L2, na.rm = TRUE),  L2_SD  = sd(L2, na.rm = TRUE),
+        MSPE_mean= mean(MSPE, na.rm = TRUE), MSPE_SD= sd(MSPE, na.rm = TRUE)
       ) %>%
       mutate(config = config$name, a = a, number_of_simulations = number_of_simulations)
     
