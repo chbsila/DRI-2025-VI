@@ -141,5 +141,5 @@ for (config in configurations) {
 
 
 results <- bind_rows(results)
-write.csv(results, "DRI_results_other_methods_optimized.csv", row.names = FALSE)
+write.csv(results, "DRI_results_other_methods.csv", row.names = FALSE)
 toc()
