@@ -1,4 +1,3 @@
-
 # ------------------------------------------------------------
 # Metrics Summary for other Bayesian Methods (Excluding SVI): 
 # SSLASSO, ebreg, sparsevb
@@ -58,13 +57,13 @@ compute_metrics <- function(mu, gamma, theta, X, Y) {
 }
 
 # ============================================================
-# Experiment Configurations
+# Experiment Configurations (Aligned with CAVI/SVI)
 # ============================================================
 configurations <- list(
   list(name = "(i)",    n = 100,  p = 200,   s = 10),
   list(name = "(ii)",   n = 400,  p = 1000,  s = 40),
   list(name = "(iii)",  n = 200,  p = 800,   s = 5),
-  list(name = "(iv)",   n = 300,  p = 2000,  s = 20)
+  list(name = "(iv)",   n = 300,  p = 450,   s = 20)   
 )
 
 methods <- c("sparsevb", "SSLASSO", "ebreg")
@@ -86,7 +85,8 @@ for (config in configurations) {
   
   for (method in methods) {
     cat("\nMethod:", method, "\n")
-    pb <- progress_bar$new(total = number_of_simulations, format = paste(method, " [:bar] :percent ETA: :eta"))
+    pb <- progress_bar$new(total = number_of_simulations, 
+                           format = paste(method, " [:bar] :percent ETA: :eta"))
     
     metrics_list <- vector("list", number_of_simulations)
     
@@ -104,7 +104,7 @@ for (config in configurations) {
         gamma <- fit$gamma
         
       } else if (method == "SSLASSO") {
-        fit <- SSLASSO(X = sim$X, y = sim$Y, family = "gaussian")
+        fit <- SSLASSO(x = sim$X, y = sim$Y, family = "gaussian")
         mu <- as.vector(coef(fit)[-1])
         gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
         
@@ -123,25 +123,23 @@ for (config in configurations) {
     # Combine metrics
     metrics_df <- bind_rows(metrics_list)
     
-    # Median + IQR summary
+    # Mean ± SD summary 
     metrics_summary <- metrics_df %>%
       summarise(
-        TPR_median = median(TPR, na.rm = TRUE), TPR_IQR = IQR(TPR, na.rm = TRUE),
-        FDR_median = median(FDR, na.rm = TRUE), FDR_IQR = IQR(FDR, na.rm = TRUE),
-        L2_median  = median(L2, na.rm = TRUE),  L2_IQR  = IQR(L2, na.rm = TRUE),
-        MSPE_median= median(MSPE, na.rm = TRUE), MSPE_IQR= IQR(MSPE, na.rm = TRUE)
+        TPR_mean = mean(TPR, na.rm = TRUE), TPR_SD = sd(TPR, na.rm = TRUE),
+        FDR_mean = mean(FDR, na.rm = TRUE), FDR_SD = sd(FDR, na.rm = TRUE),
+        L2_mean  = mean(L2, na.rm = TRUE),  L2_SD  = sd(L2, na.rm = TRUE),
+        MSPE_mean= mean(MSPE, na.rm = TRUE), MSPE_SD= sd(MSPE, na.rm = TRUE)
       ) %>%
       mutate(config = config$name, method = method,
              number_of_simulations = number_of_simulations)
     
-    # Save individual method result
     write.csv(metrics_summary, paste0("results_", method, "_", config$name, ".csv"), row.names = FALSE)
     results <- append(results, list(metrics_summary))
   }
 }
 
-# Combine all summaries
+
 results <- bind_rows(results)
 write.csv(results, "DRI_results_other_methods_optimized.csv", row.names = FALSE)
-
 toc()
