@@ -145,9 +145,9 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
     }
     
     # Parameter updates 
-    mu <- mu + eta * grad_mu
-    sigma1 <- pmax(sigma1 + eta * grad_sigma, eps_safe)  # must be positive
-    gamma <- gamma + eta * grad_gamma
+    mu <- mu - eta * grad_mu
+    sigma1 <- pmax(sigma1 - eta * grad_sigma, eps_safe)  # must be positive
+    gamma <- gamma - eta * grad_gamma
     gamma <- pmin(pmax(gamma, eps_safe), 1 - eps_safe)   # must be in (0,1)
     
     # VR Bound 
@@ -230,6 +230,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()  # End profiling
+
 
 
 
