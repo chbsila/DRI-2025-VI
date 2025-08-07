@@ -144,13 +144,15 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
     sigma1 <- sigma1 + eta * grad_sigma
     gamma <- gamma + eta * grad_gamma
     
+    # Keep gamma within (0, 1)
+    gamma <- pmin(pmax(gamma, eps_safe), 1 - eps_safe)
+    
     # VR Bound
     vr_bound <- (1 / (1 - a)) * (log(mean(exp(log_ratios))))
     if (is.nan(vr_bound) || is.infinite(vr_bound)) vr_bound <- vr_bound_prev
     if (verbose && iter %% 20 == 0) cat(sprintf("Iteration %d: VR Bound = %.4f\n", iter, vr_bound))
                         
-    if (!is.na(vr_bound) && abs(vr_bound - vr_bound_prev) < eps) break #Stopping Criterion
-                        
+    if (!is.na(vr_bound) && abs(vr_bound - vr_bound_prev) < eps) break #Stopping Criterion      
     vr_bound_prev <- vr_bound
   }
   
@@ -178,7 +180,7 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
 a_values <- c(0.01, 0.1, 0.25, 0.5, 0.77, 0.9, 0.99, 1.01, 1.1, 1.2, 1.3, 1.5, 2, 3, 5, 100)
 configurations <- list(
   list(name = "(i)",  n = 100,  p = 200,   s = 10),
-  #list(name = "(ii)", n = 400,  p = 1000,  s = 40), list(name = "(iii)", n = 200, p = 800,   s = 5),
+  list(name = "(ii)", n = 400,  p = 1000,  s = 40), list(name = "(iii)", n = 200, p = 800,   s = 5),
   list(name = "(iv)", n = 300,  p = 450,   s = 20)
 )
 
@@ -225,3 +227,4 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()  # End profiling
+
