@@ -97,7 +97,8 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   # Ridge initialization
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
-  gamma <- ifelse(abs(mu) > 1, 1, 0)
+  #gamma <- ifelse(abs(mu) > 1, 1, 0) This is too unstable
+  gamma <- ifelse(abs(mu) > 1, 0.999, eps_safe)
   sigma1 <- rep(1, p)
   alpha_h <- sum(gamma)
   beta_h <- p - alpha_h
@@ -138,7 +139,7 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
           grad_sigma[i] <- grad_sigma[i] + weights[k] * (((theta_k[i] - mu[i])^2 - sigma1[i]^2) / (sigma1[i]^3 + eps_safe))
         }
         grad_gamma[i] <- grad_gamma[i] + weights[k] * (
-          (z_k[i] / (gamma[i] + eps_safe)) - ((1 - z_k[i]) / (1 - gamma[i] + eps_safe))
+          (z_k[i] / gamma[i]) - ((1 - z_k[i]) / (1 - gamma[i]))
         )
       }
     }
@@ -229,5 +230,6 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()  # End profiling
+
 
 
