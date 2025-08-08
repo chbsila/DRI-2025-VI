@@ -23,7 +23,6 @@ library(glmnet)
 library(tidyr)
 library(dplyr)
 library(doMC)
-library(progress)   # Progress bars
 library(tictoc)     # Run-time profiling
 
 # ============================================================
@@ -38,14 +37,19 @@ eps_safe <- 1e-7
 number_of_simulations <- 100
 
 # ============================================================
-# Simulation Function
+# Simulation Function (Optimized)
 # ============================================================
 simulate <- function(n, p, s) {
   X <- matrix(rnorm(n * p, mean = 0), n, p)
   theta <- numeric(p)
   theta[sample.int(p, s)] <- runif(s, -3, 3)
   Y <- X %*% theta + rnorm(n)
-  list(X = X, Y = Y, theta = theta)
+  XtX <- crossprod(X)
+  YtX <- crossprod(Y, X)
+  ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
+  mu_init <- as.vector(coef(ridge_fit))[-1]
+  mu_init[is.na(mu_init)] <- 0
+  list(X = X, Y = Y, theta = theta, XtX = XtX, YtX = YtX, mu_init = mu_init)
 }
 
 # ============================================================
@@ -54,16 +58,16 @@ simulate <- function(n, p, s) {
 safe_sum <- function(x) if (length(x) == 0) 0 else sum(x)
 
 # ============================================================
-# Helper Functions (A_i, B_i, C_i, etc.)
+# Helper Functions
 # ============================================================
-A_i_mu <- function(mu_i, X, Y, mu, sigma1, gamma, lambda, i, p, XtX, YtX) {
+A_i_mu <- function(mu_i, mu, sigma1, gamma, lambda, i, p, XtX, YtX) {
   sum_j <- if (p > 1) safe_sum(gamma[-i] * mu[-i] * XtX[-i, i]) else 0
   smoothed_grad <- mu_i / sqrt(mu_i^2 + eps_safe)
   term <- -YtX[i] + mu_i * XtX[i, i] + sum_j + lambda * smoothed_grad
   (term^2) * sigma1[i]^2
 }
 
-A_i_sigma <- function(sigma_i, X, Y, mu, sigma1, gamma, lambda, i, p, XtX, YtX) {
+A_i_sigma <- function(sigma_i, mu, sigma1, gamma, lambda, i, p, XtX, YtX) {
   sum_j <- if (p > 1) safe_sum(gamma[-i] * mu[-i] * XtX[-i, i]) else 0
   smoothed_grad <- mu[i] / sqrt(mu[i]^2 + eps_safe)
   term <- -YtX[i] + mu[i] * XtX[i, i] + sum_j + lambda * smoothed_grad
@@ -110,17 +114,17 @@ g_func_sigma <- function(sigma_i, mu, sigma1, gamma, lambda, a, i, XtX, YtX) {
   exp(exponent)
 }
 
-kappa_mu <- function(mu_i, X, Y, mu, sigma1, gamma, lambda, a, p, i, XtX, YtX) {
+kappa_mu <- function(mu_i, mu, sigma1, gamma, lambda, a, p, i, XtX, YtX) {
   g_val <- g_func_mu(mu_i, mu, sigma1, gamma, lambda, a, i, XtX, YtX)
-  Ai <- A_i_mu(mu_i, X, Y, mu, sigma1, gamma, lambda, i, p, XtX, YtX)
+  Ai <- A_i_mu(mu_i, mu, sigma1, gamma, lambda, i, p, XtX, YtX)
   Bi <- B_i_mu(mu_i, sigma1, lambda, i, XtX)
   Ci <- C_i_mu(mu_i, mu, sigma1, gamma, i, XtX)
   g_val * (1 + ((a - 1)^2 / 2) * Ai + ((a - 1) / 2) * Bi + ((a - 1)^2 / 2) * Ci)
 }
 
-kappa_sigma <- function(sigma_i, X, Y, mu, sigma1, gamma, lambda, a, p, i, XtX, YtX) {
+kappa_sigma <- function(sigma_i, mu, sigma1, gamma, lambda, a, p, i, XtX, YtX) {
   g_val <- g_func_sigma(sigma_i, mu, sigma1, gamma, lambda, a, i, XtX, YtX)
-  Ai <- A_i_sigma(sigma_i, X, Y, mu, sigma1, gamma, lambda, i, p, XtX, YtX)
+  Ai <- A_i_sigma(sigma_i, mu, sigma1, gamma, lambda, i, p, XtX, YtX)
   Bi <- B_i_sigma(sigma_i, mu, lambda, i, XtX)
   Ci <- C_i_sigma(mu, sigma1, gamma, i, XtX)
   g_val * (1 + ((a - 1)^2 / 2) * Ai + ((a - 1) / 2) * Bi + ((a - 1)^2 / 2) * Ci)
@@ -136,52 +140,46 @@ delta <- function(g_old, g_new) {
 }
 
 # ============================================================
-# CAVI Algorithm 
+# CAVI Algorithm (Optimized: no XtX/YtX recompute)
 # ============================================================
-rvi.fit <- function(X, Y, a, prior_scale = 1) {
-  n <- nrow(X); p <- ncol(X)
-  XtX <- t(X) %*% X #should be outside for faster computation
-  YtX <- t(Y) %*% X
-  eps <- 1e-7
-  max_iterations <- 100
-  
-  ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
-  mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
+rvi.fit <- function(X, Y, XtX, YtX, mu_init, a, prior_scale = 1) {
+  p <- ncol(X)
+  mu <- mu_init
   gamma <- ifelse(abs(mu) > 1, 1, 0)
   sigma1 <- rep(1, p)
   
-  
-  #Empirical Bayes with interval bounds
   upper_bound = max(mu) + max(sigma1)
   lower_bound = min(mu) - max(sigma1)
   sigma_upper_bound = max(sigma1) + 1
-  
   alpha_h <- sum(gamma)
   beta_h <- p - alpha_h
   
   update_order <- order(abs(mu), decreasing = TRUE)
   k <- 1; deltav <- 1
+  eps <- 1e-7
+  max_iterations <- 100
   
   while (k < max_iterations && deltav > eps) {
     gamma_old <- gamma
     for (i in update_order) {
       mu[i] <- tryCatch(
-        optimize(f = function(m) kappa_mu(m, X, Y, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
+        optimize(f = function(m) kappa_mu(m, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
                  interval = c(lower_bound, upper_bound))$minimum, error = function(e) mu[i])
       sigma1[i] <- tryCatch(
-        optimize(f = function(s) kappa_sigma(s, X, Y, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
+        optimize(f = function(s) kappa_sigma(s, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
                  interval = c(1e-7, sigma_upper_bound))$minimum, error = function(e) sigma1[i])
       
-      Gamma_i <- log(alpha_h / beta_h) + log(sqrt(pi) * sigma1[i] * prior_scale / sqrt(2)) + YtX[i] * mu[i] - mu[i] * sum((XtX[i, -i]) * gamma[-i] * mu[-i]) -0.5 * XtX[i, i] * (sigma1[i]^2 + mu[i]^2) -
-        prior_scale * sigma1[i] * sqrt(2 / pi) * exp(-mu[i]^2 / (2 * sigma1[i]^2)) - prior_scale * mu[i] * (1 - 2 * pnorm(-mu[i] / sigma1[i])) +0.5
-      gamma[i] <- 1 / (1 + exp(-Gamma_i))  # logit inverse
+      Gamma_i <- log(alpha_h / beta_h) + log(sqrt(pi) * sigma1[i] * prior_scale / sqrt(2)) +
+        YtX[i] * mu[i] - mu[i] * sum((XtX[i, -i]) * gamma[-i] * mu[-i]) -
+        0.5 * XtX[i, i] * (sigma1[i]^2 + mu[i]^2) -
+        prior_scale * sigma1[i] * sqrt(2 / pi) * exp(-mu[i]^2 / (2 * sigma1[i]^2)) -
+        prior_scale * mu[i] * (1 - 2 * pnorm(-mu[i] / sigma1[i])) + 0.5
+      gamma[i] <- 1 / (1 + exp(-Gamma_i))
     }
-    #Empirical Bayes
     upper_bound = max(mu) + max(sigma1)
     lower_bound = min(mu) - max(sigma1)
     sigma_upper_bound = max(sigma1) + 1
     alpha_h <- sum(gamma); beta_h <- p - alpha_h
-    
     k <- k + 1
     deltav <- delta(gamma_old, gamma)
   }
@@ -196,10 +194,10 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
   posterior_mean <- mu * gamma
   pos_TR <- as.numeric(theta != 0)
   pos <- as.numeric(gamma > 0.5) 
-  TPR <- sum((pos == 1) & (pos_TR == 1)) / sum(pos_TR)                 # True Positive Rate
-  FDR <- sum((pos == 1) & (pos_TR == 0)) / max(sum(pos), 1)            # False Discovery Rate
-  L2 <- sqrt(sum((posterior_mean - theta)^2))                          # L2 error
-  MSPE <- sqrt(sum((X %*% posterior_mean - Y)^2) / n)                  # Prediction error
+  TPR <- sum((pos == 1) & (pos_TR == 1)) / sum(pos_TR)
+  FDR <- sum((pos == 1) & (pos_TR == 0)) / max(sum(pos), 1)
+  L2 <- sqrt(sum((posterior_mean - theta)^2))
+  MSPE <- sqrt(sum((X %*% posterior_mean - Y)^2) / n)
   data.frame(TPR, FDR, L2, MSPE)
 }
 
@@ -207,11 +205,14 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
 # Experiment Configurations
 # ============================================================
 a_values <- c(1.01, 1.1, 1.2, 1.3, 1.5, 2, 3, 5, 100)
-configurations <- list(list(name = "(i)",  n = 100,  p = 200,   s = 10), list(name = "(ii)",   n = 400,  p = 1000,  s = 40), list(name = "(iii)",  n = 200,  p = 800,   s = 5), list(name = "(iv)",   n = 300,  p = 450,  s = 20)
+configurations <- list(list(name = "(i)",  n = 100,  p = 200,   s = 10), 
+                       list(name = "(ii)",   n = 400,  p = 1000,  s = 40), 
+                       list(name = "(iii)",  n = 200,  p = 800,   s = 5),
+                       list(name = "(iv)",   n = 300,  p = 450,  s = 20)
 )
 
 # ============================================================
-# Optimized Run: Shared Simulations Per Config
+# Parallel Run
 # ============================================================
 results <- list()
 tic("Total runtime")
@@ -219,7 +220,6 @@ tic("Total runtime")
 for (config in configurations) {
   cat("\n=== Running configuration:", config$name, "===\n")
   
-  # Generate simulations ONCE
   sims <- vector("list", number_of_simulations)
   for (i in 1:number_of_simulations) {
     sims[[i]] <- simulate(config$n, config$p, config$s)
@@ -227,12 +227,15 @@ for (config in configurations) {
   
   for (a in a_values) {
     cat("\nAlpha:", a, "\n")
-    pb <- progress_bar$new(total = number_of_simulations, format = "[:bar] :percent ETA: :eta")
-    
-    metrics_list <- foreach(sim_idx = 1:number_of_simulations, .combine = bind_rows) %do% {
-      pb$tick()
+    metrics_list <- foreach(
+      sim_idx = 1:number_of_simulations,
+      .combine = bind_rows,
+      .packages = c("glmnet", "dplyr")
+    ) %dopar% {
       sim <- sims[[sim_idx]]
-      fit <- suppressWarnings(rvi.fit(sim$X, sim$Y, a, prior_scale = 1))
+      fit <- suppressWarnings(
+        rvi.fit(sim$X, sim$Y, sim$XtX, sim$YtX, sim$mu_init, a, prior_scale = 1)
+      )
       compute_metrics(fit$mu, fit$sigma1, fit$gamma, sim$theta, sim$X, sim$Y)
     }
     
@@ -245,11 +248,11 @@ for (config in configurations) {
       ) %>%
       mutate(config = config$name, a = a, number_of_simulations = number_of_simulations)
     
-    write.csv(metrics_summary, paste0("results_", a, "_", config$name, ".csv"))
+    write.csv(metrics_summary, paste0("results_", a, "_", config$name, ".csv"), row.names = FALSE)
     results <- append(results, list(metrics_summary))
   }
 }
 
 results <- bind_rows(results)
-write.csv(results, "DRI_results.csv")
-toc() #end profiling total time
+write.csv(results, "DRI_results.csv", row.names = FALSE)
+toc()

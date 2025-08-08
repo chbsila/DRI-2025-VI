@@ -1,50 +1,50 @@
-
 # ------------------------------------------------------------
 # Metrics Summary for other Bayesian Methods (Excluding SVI): 
-# SSLASSO, ebreg, sparsevb
+# spikeslab (https://cran.r-project.org/web/packages/spikeslab/index.html),
+# varbvs (https://cran.r-project.org/web/packages/varbvs/index.html),
+# sparsevb (https://cran.r-project.org/web/packages/sparsevb/index.html)
 #
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
 # ------------------------------------------------------------
 
-# ============================================================
-# Set Working Directory to Existing DRI Folder
-# ============================================================
-save_dir <- "~/Desktop/Other Methods"   
+# =========================
+# Working Directory
+# =========================
+save_dir <- "~/Desktop/Other Methods"
 setwd(save_dir)
 cat("Saving all results to:", getwd(), "\n")
 
-# ============================================================
+# =========================
 # Libraries
-# ============================================================
+# =========================
 library(sparsevb)
-library(SSLASSO)
+library(spikeslab)
 library(glmnet)
 library(tidyr)
 library(dplyr)
-library(ebreg)
-library(progress)   # For progress bars
-library(tictoc)     # For profiling runtime
+library(varbvs)
+library(progress)
+library(tictoc)
 
-# ============================================================
-# Global Constants
-# ============================================================
+# =========================
+# Constants
+# =========================
 number_of_simulations <- 100
 
-# ============================================================
-# Simulation Function
-# ============================================================
+# =========================
+# Simulation
+# =========================
 simulate <- function(n, p, s) {
   X <- matrix(rnorm(n * p), n, p)
-  theta <- numeric(p)
-  theta[sample.int(p, s)] <- runif(s, -3, 3)
-  Y <- X %*% theta + rnorm(n)
+  theta <- numeric(p); theta[sample.int(p, s)] <- runif(s, -3, 3)
+  Y <- as.numeric(X %*% theta + rnorm(n))
   list(X = X, Y = Y, theta = theta)
 }
 
-# ============================================================
-# Metrics Computation
-# ============================================================
+# =========================
+# Metrics
+# =========================
 compute_metrics <- function(mu, gamma, theta, X, Y) {
   n <- nrow(X)
   posterior_mean <- mu * gamma
@@ -57,28 +57,27 @@ compute_metrics <- function(mu, gamma, theta, X, Y) {
   data.frame(TPR, FDR, L2, MSPE)
 }
 
-# ============================================================
-# Experiment Configurations
-# ============================================================
+# =========================
+# Configs
+# =========================
 configurations <- list(
   list(name = "(i)",    n = 100,  p = 200,   s = 10),
   list(name = "(ii)",   n = 400,  p = 1000,  s = 40),
   list(name = "(iii)",  n = 200,  p = 800,   s = 5),
-  list(name = "(iv)",   n = 300,  p = 2000,  s = 20)
+  list(name = "(iv)",   n = 300,  p = 450,   s = 20)
 )
 
-methods <- c("sparsevb", "SSLASSO", "ebreg")
+methods <- c("sparsevb", "spikeslab", "varbvs")
 results <- list()
 
-# ============================================================
-# Optimized Run: Shared Simulations Per Config
-# ============================================================
+# =========================
+# Run
+# =========================
 tic("Total runtime")
 
 for (config in configurations) {
   cat("\n=== Running configuration:", config$name, "===\n")
   
-  # Generate simulations ONCE for this configuration
   sims <- vector("list", number_of_simulations)
   for (i in 1:number_of_simulations) {
     sims[[i]] <- simulate(config$n, config$p, config$s)
@@ -86,62 +85,64 @@ for (config in configurations) {
   
   for (method in methods) {
     cat("\nMethod:", method, "\n")
-    pb <- progress_bar$new(total = number_of_simulations, format = paste(method, " [:bar] :percent ETA: :eta"))
+    pb <- progress_bar$new(total = number_of_simulations,
+                           format = paste(method, " [:bar] :percent ETA: :eta"))
     
     metrics_list <- vector("list", number_of_simulations)
     
     for (sim_idx in 1:number_of_simulations) {
       pb$tick()
-      sim <- sims[[sim_idx]]  # Reuse pre-generated simulation
+      sim <- sims[[sim_idx]]
+      p <- ncol(sim$X); xnames <- colnames(sim$X)
       
-      # ------------------------
-      # Fit each method
-      # ------------------------
       if (method == "sparsevb") {
-        fit <- svb.fit(sim$X, sim$Y, family = "linear", slab = "laplace",
-                       sigma = rep(1, ncol(sim$X)), prior_scale = 1)
-        mu <- fit$mu
-        gamma <- fit$gamma
+        fit <- svb.fit(sim$X, sim$Y,
+                       family = "linear", slab = "laplace",
+                       sigma = rep(1, p), prior_scale = 1)
         
-      } else if (method == "SSLASSO") {
-        fit <- SSLASSO(X = sim$X, y = sim$Y, family = "gaussian")
-        mu <- as.vector(coef(fit)[-1])
-        gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
+        mu <- as.numeric(fit$mu)
+        gamma <- as.numeric(fit$gamma)
         
-      } else if (method == "ebreg") {
-        fit <- ebreg(X = sim$X, y = sim$Y)
-        mu <- fit$PosteriorMean
-        gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
-      }
+      } else if (method == "spikeslab") {
+        
+        fit <- spikeslab(x = sim$X,
+                         y = sim$Y,
+                         verbose = FALSE)
+        mu <- fit$bma # Bayesian Model Averaging (BMA) 
+        gamma <- as.numeric(abs(mu) > 1e-3)
+      } 
       
-      # ------------------------
-      # Compute metrics
-      # ------------------------
+      else if (method == "varbvs") {
+        fit <- varbvs(X = sim$X, Z = NULL,
+                         y = sim$Y, family = "gaussian", verbose = FALSE)
+        mu <- fit$beta #Beta: "Averaged" posterior mean regression coefficients
+        gamma <- fit$pip #Pip: "Averaged" posterior inclusion probabilities
+        
+      } 
+      
       metrics_list[[sim_idx]] <- compute_metrics(mu, gamma, sim$theta, sim$X, sim$Y)
     }
     
-    # Combine metrics
     metrics_df <- bind_rows(metrics_list)
     
-    # Median + IQR summary
     metrics_summary <- metrics_df %>%
       summarise(
-        TPR_median = median(TPR, na.rm = TRUE), TPR_IQR = IQR(TPR, na.rm = TRUE),
-        FDR_median = median(FDR, na.rm = TRUE), FDR_IQR = IQR(FDR, na.rm = TRUE),
-        L2_median  = median(L2, na.rm = TRUE),  L2_IQR  = IQR(L2, na.rm = TRUE),
-        MSPE_median= median(MSPE, na.rm = TRUE), MSPE_IQR= IQR(MSPE, na.rm = TRUE)
+        TPR_mean = mean(TPR, na.rm = TRUE), TPR_SD = sd(TPR, na.rm = TRUE),
+        FDR_mean = mean(FDR, na.rm = TRUE), FDR_SD = sd(FDR, na.rm = TRUE),
+        L2_mean  = mean(L2, na.rm = TRUE),  L2_SD  = sd(L2, na.rm = TRUE),
+        MSPE_mean= mean(MSPE, na.rm = TRUE), MSPE_SD= sd(MSPE, na.rm = TRUE)
       ) %>%
       mutate(config = config$name, method = method,
              number_of_simulations = number_of_simulations)
     
-    # Save individual method result
-    write.csv(metrics_summary, paste0("results_", method, "_", config$name, ".csv"), row.names = FALSE)
+    write.csv(metrics_summary,
+              paste0("results_", method, "_", config$name, ".csv"),
+              row.names = FALSE)
     results <- append(results, list(metrics_summary))
   }
 }
 
-# Combine all summaries
 results <- bind_rows(results)
-write.csv(results, "DRI_results_other_methods_optimized.csv", row.names = FALSE)
+write.csv(results, "DRI_results_other_methods.csv", row.names = FALSE)
 
 toc()
