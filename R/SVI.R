@@ -96,10 +96,7 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   # Ridge initialization
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
-  gamma_init <- ifelse(abs(mu) > 1, 0.999, eps_safe)
-
-  # Logit parameter for gamma
-  eta_gamma <- qlogis(gamma_init)
+  gamma <- ifelse(abs(mu) > 1, 0.999, eps_safe) # We have 1-gamma in some denominators
 
   sigma1 <- rep(1, p)
   alpha_h <- sum(gamma_init)
@@ -129,7 +126,7 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
       z_samples[[k]] <- z_k
     }
 
-    # Normalized weights
+    # Normalized weights since exp(large numer) = NaN
     log_ratios_centered <- log_ratios - max(log_ratios, na.rm = TRUE)
     weights <- exp(log_ratios_centered)
     weights <- weights / sum(weights, na.rm = TRUE)
@@ -153,7 +150,7 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
     mu     <- mu     + lr * grad_mu
     sigma1 <- sigma1 + lr * grad_sigma
     grad_eta_gamma <- grad_gamma * gamma * (1 - gamma)
-    eta_gamma <- eta_gamma + lr * grad_eta_gamma
+    gamma <- gamma + lr * grad_gamma #issue is that gamma needs to be in (0,1)
 
     # Bound
     vr_bound <- (1 / (1 - a)) * (log(mean(exp(log_ratios_centered))) + max(log_ratios, na.rm = TRUE))
@@ -161,8 +158,7 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
     if (is.finite(vr_bound) && is.finite(vr_bound_prev) && abs(vr_bound - vr_bound_prev) < eps) break
     vr_bound_prev <- vr_bound
   }
-
-  gamma <- plogis(eta_gamma)
+                        
   list(mu = mu, sigma1 = sigma1, gamma = gamma)
 }
 
@@ -235,6 +231,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
