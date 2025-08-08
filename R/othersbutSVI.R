@@ -1,6 +1,6 @@
 # ------------------------------------------------------------
 # Metrics Summary for other Bayesian Methods (Excluding SVI): 
-# SSLASSO, ebreg, sparsevb
+# spikeslab, BoomSpikeSlab, sparsevb
 #
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
@@ -17,11 +17,11 @@ cat("Saving all results to:", getwd(), "\n")
 # Libraries
 # ============================================================
 library(sparsevb)
-library(SSLASSO)
+library(spikeslab)
 library(glmnet)
 library(tidyr)
 library(dplyr)
-library(ebreg)
+library(BoomSpikeSlab)
 library(progress)   # For progress bars
 library(tictoc)     # For profiling runtime
 
@@ -66,7 +66,7 @@ configurations <- list(
   list(name = "(iv)",   n = 300,  p = 450,   s = 20)   
 )
 
-methods <- c("sparsevb", "SSLASSO", "ebreg")
+methods <- c("sparsevb", "spikeslab", "BoomSpikeSlab")
 results <- list()
 
 # ============================================================
@@ -103,13 +103,13 @@ for (config in configurations) {
         mu <- fit$mu
         gamma <- fit$gamma
         
-      } else if (method == "SSLASSO") {
-        fit <- SSLASSO(x = sim$X, y = sim$Y, family = "gaussian")
+      } else if (method == "spikeslab") {
+        fit <- spikeslab(x = sim$X, y = sim$Y, family = "gaussian")
         mu <- as.vector(coef(fit)[-1])
         gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
         
-      } else if (method == "ebreg") {
-        fit <- ebreg(X = sim$X, y = sim$Y)
+      } else if (method == "BoomSpikeSlab") {
+        fit <- BoomSpikeSlab(X = sim$X, y = sim$Y)
         mu <- fit$PosteriorMean
         gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
       }
