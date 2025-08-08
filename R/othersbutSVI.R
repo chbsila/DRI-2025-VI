@@ -1,6 +1,8 @@
 # ------------------------------------------------------------
 # Metrics Summary for other Bayesian Methods (Excluding SVI): 
-# spikeslab, varbvs, sparsevb
+# spikeslab (https://cran.r-project.org/web/packages/spikeslab/index.html),
+# varbvs (https://cran.r-project.org/web/packages/varbvs/index.html),
+# sparsevb (https://cran.r-project.org/web/packages/sparsevb/index.html)
 #
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
