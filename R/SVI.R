@@ -69,7 +69,7 @@ log_joint <- function(theta, z, Y, X, sigma2, lambda, w) {
 }
 
 # ============================================================
-# Log Variational Density: log P_mu,sigma,gamma(theta, z)
+# Log Variational Density: log q(theta, z)
 # ============================================================
 log_variational <- function(theta, mu, sigma1, gamma) {
   log_q <- 0
@@ -84,20 +84,23 @@ log_variational <- function(theta, mu, sigma1, gamma) {
 }
 
 # ============================================================
-# SVI Algorithm 
+# SVI Algorithm with logit reparameterization for gamma
 # ============================================================
 svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
                     alpha_h = 1.0, beta_h = 1.0,
-                    eta = 0.01, K = 1000, max_iter = 100,
+                    lr = 0.01, K = 100, max_iter = 100,
                     eps = 1e-7, verbose = TRUE) {
   n <- nrow(X)
   p <- ncol(X)
 
-  # Ridge init
+  # Ridge initialization
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
   gamma_init <- ifelse(abs(mu) > 1, 0.999, eps_safe)
+
+  # Logit parameter for gamma
   eta_gamma <- qlogis(gamma_init)
+
   sigma1 <- rep(1, p)
   alpha_h <- sum(gamma_init)
   beta_h <- p - alpha_h
@@ -106,6 +109,9 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   vr_bound_prev <- 0
 
   for (iter in 1:max_iter) {
+    # Map eta_gamma to gamma in (0,1)
+    gamma <- plogis(eta_gamma)
+
     grad_mu <- grad_sigma <- grad_gamma <- rep(0, p)
     log_ratios <- numeric(K)
     theta_samples <- vector("list", K)
@@ -123,12 +129,12 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
       z_samples[[k]] <- z_k
     }
 
-    # weights (normalized for stability)
+    # Normalized weights
     log_ratios_centered <- log_ratios - max(log_ratios, na.rm = TRUE)
     weights <- exp(log_ratios_centered)
     weights <- weights / sum(weights, na.rm = TRUE)
 
-    # gradients
+    # Gradients
     for (k in 1:K) {
       theta_k <- theta_samples[[k]]
       z_k <- z_samples[[k]]
@@ -142,20 +148,20 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
         grad_gamma[i] <- grad_gamma[i] + weights[k] * ((z_k[i] / gamma[i]) - ((1 - z_k[i]) / (1 - gamma[i])))
       }
     }
-  
-    mu  <- mu + eta * grad_mu
-    sigma1 <- sigma1 + eta * grad_sigma
 
-    # update on logit scale via chain rule
+    # Updates
+    mu     <- mu     + lr * grad_mu
+    sigma1 <- sigma1 + lr * grad_sigma
     grad_eta_gamma <- grad_gamma * gamma * (1 - gamma)
-    eta_gamma <- eta_gamma + eta * grad_eta_gamma
+    eta_gamma <- eta_gamma + lr * grad_eta_gamma
 
-    # bound
+    # Bound
     vr_bound <- (1 / (1 - a)) * (log(mean(exp(log_ratios_centered))) + max(log_ratios, na.rm = TRUE))
     if (!is.finite(vr_bound)) vr_bound <- vr_bound_prev
     if (is.finite(vr_bound) && is.finite(vr_bound_prev) && abs(vr_bound - vr_bound_prev) < eps) break
     vr_bound_prev <- vr_bound
   }
+
   gamma <- plogis(eta_gamma)
   list(mu = mu, sigma1 = sigma1, gamma = gamma)
 }
@@ -181,8 +187,9 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
 a_values <- c(0.01, 0.1, 0.25, 0.5, 0.77, 0.9, 0.99, 1.01, 1.1, 1.2, 1.3, 1.5, 2, 3, 5, 100)
 configurations <- list(
   list(name = "(i)",  n = 100,  p = 200,   s = 10),
-  list(name = "(ii)", n = 400,  p = 1000,  s = 40), list(name = "(iii)", n = 200, p = 800,   s = 5),
-  list(name = "(iv)", n = 300,  p = 450,   s = 20)
+  list(name = "(ii)", n = 400,  p = 1000,  s = 40),
+  list(name = "(iii)", n = 200, p = 800,   s = 5),
+  list(name = "(iv)",  n = 300, p = 450,   s = 20)
 )
 
 # ============================================================
@@ -227,8 +234,7 @@ for (config in configurations) {
 
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
-toc()  # End profiling
-
+toc()
 
 
 
