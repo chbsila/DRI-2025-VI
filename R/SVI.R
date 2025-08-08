@@ -97,10 +97,7 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
   gamma_init <- ifelse(abs(mu) > 1, 0.999, eps_safe)
-
-  # --- NEW: logit parameter for gamma ---
-  eta_gamma <- qlogis(pmin(pmax(gamma_init, eps_safe), 1 - eps_safe))
-
+  eta_gamma <- qlogis(gamma_init)
   sigma1 <- rep(1, p)
   alpha_h <- sum(gamma_init)
   beta_h <- p - alpha_h
@@ -109,9 +106,6 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   vr_bound_prev <- 0
 
   for (iter in 1:max_iter) {
-    # --- NEW: map back to (0,1) every iter ---
-    gamma <- plogis(eta_gamma)
-
     grad_mu <- grad_sigma <- grad_gamma <- rep(0, p)
     log_ratios <- numeric(K)
     theta_samples <- vector("list", K)
@@ -152,15 +146,13 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
     mu  <- mu + eta * grad_mu
     sigma1 <- sigma1 + eta * grad_sigma
 
-    # --- NEW: update on logit scale via chain rule; NO CLIPPING ---
-    # dL/d(eta_gamma) = dL/d(gamma) * gamma*(1-gamma)
+    # update on logit scale via chain rule
     grad_eta_gamma <- grad_gamma * gamma * (1 - gamma)
-    eta_gamma <- eta_gamma - eta * grad_eta_gamma
+    eta_gamma <- eta_gamma + eta * grad_eta_gamma
 
     # bound
     vr_bound <- (1 / (1 - a)) * (log(mean(exp(log_ratios_centered))) + max(log_ratios, na.rm = TRUE))
     if (!is.finite(vr_bound)) vr_bound <- vr_bound_prev
-    if (verbose && iter %% 20 == 0) cat(sprintf("Iteration %d: VR Bound = %.4f\n", iter, vr_bound))
     if (is.finite(vr_bound) && is.finite(vr_bound_prev) && abs(vr_bound - vr_bound_prev) < eps) break
     vr_bound_prev <- vr_bound
   }
@@ -236,6 +228,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()  # End profiling
+
 
 
 
