@@ -108,8 +108,8 @@ for (config in configurations) {
         fit <- spikeslab(x = sim$X,
                          y = sim$Y, bigp.smalln=TRUE,
                          verbose = FALSE)
-        mu <- fit$bma # Bayesian Model Averaging (BMA) 
-        gamma <- as.numeric(abs(mu) > 1e-3)
+        mu <- fit$gnet.scale # Generalized Elastic Net
+        gamma <- as.numeric(abs(mu) > 0)
       } 
       
       else if (method == "varbvs") {
