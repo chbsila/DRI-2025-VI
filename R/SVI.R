@@ -90,77 +90,83 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
                     alpha_h = 1.0, beta_h = 1.0,
                     eta = 0.01, K = 1000, max_iter = 100,
                     eps = 1e-7, verbose = TRUE) {
-  
   n <- nrow(X)
   p <- ncol(X)
-  
-  # Ridge initialization
+
+  # Ridge init
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
-  #gamma <- ifelse(abs(mu) > 1, 1, 0) This is too unstable
-  gamma <- ifelse(abs(mu) > 1, 0.999, eps_safe)
+  gamma_init <- ifelse(abs(mu) > 1, 0.999, eps_safe)
+
+  # --- NEW: logit parameter for gamma ---
+  eta_gamma <- qlogis(pmin(pmax(gamma_init, eps_safe), 1 - eps_safe))
+
   sigma1 <- rep(1, p)
-  alpha_h <- sum(gamma)
+  alpha_h <- sum(gamma_init)
   beta_h <- p - alpha_h
   w <- alpha_h / (alpha_h + beta_h)
-  
+
   vr_bound_prev <- 0
-  
+
   for (iter in 1:max_iter) {
+    # --- NEW: map back to (0,1) every iter ---
+    gamma <- plogis(eta_gamma)
+
     grad_mu <- grad_sigma <- grad_gamma <- rep(0, p)
     log_ratios <- numeric(K)
     theta_samples <- vector("list", K)
     z_samples <- vector("list", K)
-    
+
     for (k in 1:K) {
-      z_k <- rbinom(p, size = 1, prob = gamma)  # no need to clip here
+      z_k <- rbinom(p, size = 1, prob = gamma)
       theta_k <- sapply(1:p, function(i) if (z_k[i] == 1) rnorm(1, mu[i], sigma1[i]) else 0)
-      
+
       log_p <- log_joint(theta_k, z_k, Y, X, sigma2, prior_scale, w)
       log_q <- log_variational(theta_k, mu, sigma1, gamma)
       log_ratios[k] <- (log_p - log_q) * (1 - a)
-      
+
       theta_samples[[k]] <- theta_k
       z_samples[[k]] <- z_k
     }
 
-    # Weights were unstable so I "normalized"
+    # weights (normalized for stability)
     log_ratios_centered <- log_ratios - max(log_ratios, na.rm = TRUE)
     weights <- exp(log_ratios_centered)
     weights <- weights / sum(weights, na.rm = TRUE)
 
-    # Gradient estimates
+    # gradients
     for (k in 1:K) {
       theta_k <- theta_samples[[k]]
       z_k <- z_samples[[k]]
       for (i in 1:p) {
         if (z_k[i] == 1) {
-          grad_mu[i]    <- grad_mu[i] + weights[k] * ((theta_k[i] - mu[i]) / (sigma1[i]^2 + eps_safe))
-          grad_sigma[i] <- grad_sigma[i] + weights[k] * (((theta_k[i] - mu[i])^2 - sigma1[i]^2) / (sigma1[i]^3 + eps_safe))
+          diff <- theta_k[i] - mu[i]
+          s1 <- sigma1[i]
+          grad_mu[i]    <- grad_mu[i]    + weights[k] * (diff / (s1^2 + eps_safe))
+          grad_sigma[i] <- grad_sigma[i] + weights[k] * (((diff^2) - s1^2) / (s1^3 + eps_safe))
         }
-        grad_gamma[i] <- grad_gamma[i] + weights[k] * (
-          (z_k[i] / gamma[i]) - ((1 - z_k[i]) / (1 - gamma[i]))
-        )
+        grad_gamma[i] <- grad_gamma[i] + weights[k] * ((z_k[i] / gamma[i]) - ((1 - z_k[i]) / (1 - gamma[i])))
       }
     }
-    
-    # Parameter updates 
-    mu <- mu - eta * grad_mu
-    sigma1 <- pmax(sigma1 - eta * grad_sigma, eps_safe)  # must be positive
-    gamma <- gamma - eta * grad_gamma
-    gamma <- pmin(pmax(gamma, eps_safe), 1 - eps_safe)   # must be in (0,1)
-    
-    # VR Bound 
+  
+    mu  <- mu + eta * grad_mu
+    sigma1 <- sigma1 + eta * grad_sigma
+
+    # --- NEW: update on logit scale via chain rule; NO CLIPPING ---
+    # dL/d(eta_gamma) = dL/d(gamma) * gamma*(1-gamma)
+    grad_eta_gamma <- grad_gamma * gamma * (1 - gamma)
+    eta_gamma <- eta_gamma - eta * grad_eta_gamma
+
+    # bound
     vr_bound <- (1 / (1 - a)) * (log(mean(exp(log_ratios_centered))) + max(log_ratios, na.rm = TRUE))
     if (!is.finite(vr_bound)) vr_bound <- vr_bound_prev
     if (verbose && iter %% 20 == 0) cat(sprintf("Iteration %d: VR Bound = %.4f\n", iter, vr_bound))
     if (is.finite(vr_bound) && is.finite(vr_bound_prev) && abs(vr_bound - vr_bound_prev) < eps) break
     vr_bound_prev <- vr_bound
   }
-
-  return(list(mu = mu, sigma1 = sigma1, gamma = gamma))
+  gamma <- plogis(eta_gamma)
+  list(mu = mu, sigma1 = sigma1, gamma = gamma)
 }
-
 
 # ============================================================
 # Metrics Computation
@@ -230,6 +236,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()  # End profiling
+
 
 
 
