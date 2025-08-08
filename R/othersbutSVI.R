@@ -76,84 +76,47 @@ tic("Total runtime")
 
 for (config in configurations) {
   cat("\n=== Running configuration:", config$name, "===\n")
-
+  
   sims <- vector("list", number_of_simulations)
   for (i in 1:number_of_simulations) {
     sims[[i]] <- simulate(config$n, config$p, config$s)
   }
-
+  
   for (method in methods) {
     cat("\nMethod:", method, "\n")
     pb <- progress_bar$new(total = number_of_simulations,
                            format = paste(method, " [:bar] :percent ETA: :eta"))
-
+    
     metrics_list <- vector("list", number_of_simulations)
-
+    
     for (sim_idx in 1:number_of_simulations) {
       pb$tick()
       sim <- sims[[sim_idx]]
       p <- ncol(sim$X); xnames <- colnames(sim$X)
-
+      
       if (method == "sparsevb") {
         fit <- svb.fit(sim$X, sim$Y,
                        family = "linear", slab = "laplace",
                        sigma = rep(1, p), prior_scale = 1)
+        
         mu <- as.numeric(fit$mu)
         gamma <- as.numeric(fit$gamma)
         
-       
-        if (length(mu) != p)   mu <- c(mu, rep(0, p - length(mu)))[1:p]
-        if (length(gamma) != p) gamma <- c(gamma, rep(0, p - length(gamma)))[1:p]
-
       } else if (method == "spikeslab") {
-        # Use data.frame so names carry
-        fit <- spikeslab(x = as.data.frame(sim$X),
-                         y = as.numeric(sim$Y),
-                         verbose = FALSE)
         
-        coefs <- coef(fit) 
-        mu <- numeric(p); names(mu) <- xnames
-        
-  
-        if (!is.null(names(coefs))) {
-          idx <- setdiff(names(coefs), c("(Intercept)", "Intercept"))
-          overlap <- intersect(idx, xnames)
-          mu[overlap] <- coefs[overlap]
-        } else {
-          mu[seq_len(min(length(coefs), p))] <- coefs[seq_len(min(length(coefs), p))]
-        }
-        
+        fit <- spikeslab(x = sim$X,
+                         y = sim$Y,
+                         verbose = FALSE, n.keep = 10)
+      
+        mu <- fit$bma # Bayesian Model Averaging (BMA) 
         gamma <- as.numeric(abs(mu) > 1e-3)
-
-      } else if (method == "BoomSpikeSlab") {
-        df <- data.frame(y = as.numeric(sim$Y), as.data.frame(sim$X))
-        fit <- lm.spike(y ~ ., data = df,
-                        niter = 4000,
-                        expected.model.size = config$s)
-
-        coefs <- coef(fit)
-        mu <- numeric(p); names(mu) <- xnames
-        if (!is.null(names(coefs))) {
-          idx <- setdiff(names(coefs), c("(Intercept)", "Intercept"))
-          overlap <- intersect(idx, xnames)
-          mu[overlap] <- coefs[overlap]
-        } else {
-          mu[seq_len(min(length(coefs), p))] <- coefs[seq_len(min(length(coefs), p))]
-        }
-
-        pips <- inclusion.probabilities(fit)
-        gamma <- numeric(p); names(gamma) <- xnames
-        if (is.null(names(pips))) names(pips) <- xnames
-        overlap <- intersect(names(pips), xnames)
-        gamma[overlap] <- pips[overlap]
-        gamma <- as.numeric(gamma)
-      }
-
+        
+      } 
       metrics_list[[sim_idx]] <- compute_metrics(mu, gamma, sim$theta, sim$X, sim$Y)
     }
-
+    
     metrics_df <- bind_rows(metrics_list)
-
+    
     metrics_summary <- metrics_df %>%
       summarise(
         TPR_mean = mean(TPR, na.rm = TRUE), TPR_SD = sd(TPR, na.rm = TRUE),
@@ -163,7 +126,7 @@ for (config in configurations) {
       ) %>%
       mutate(config = config$name, method = method,
              number_of_simulations = number_of_simulations)
-
+    
     write.csv(metrics_summary,
               paste0("results_", method, "_", config$name, ".csv"),
               row.names = FALSE)
@@ -173,5 +136,5 @@ for (config in configurations) {
 
 results <- bind_rows(results)
 write.csv(results, "DRI_results_other_methods.csv", row.names = FALSE)
-toc()
 
+toc()
