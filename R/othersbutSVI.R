@@ -104,16 +104,19 @@ for (config in configurations) {
         gamma <- fit$gamma
         
       } else if (method == "spikeslab") {
-        fit <- spikeslab(x = sim$X, y = sim$Y, family = "gaussian")
-        mu <- as.vector(coef(fit)[-1])
-        gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
-        
+        fit <- spikeslab(x = sim$X, y = as.numeric(sim$Y), verbose = FALSE)
+        coefs <- coef(fit)                 # includes intercept as first entry
+        mu <- as.numeric(coefs[-1])        # drop intercept
+        # spikeslab doesn't expose true PIPs; use a pragmatic proxy
+        gamma <- as.numeric(abs(mu) > 1e-3)
       } else if (method == "BoomSpikeSlab") {
-        fit <- BoomSpikeSlab(X = sim$X, y = sim$Y)
-        mu <- fit$PosteriorMean
-        gamma <- ifelse(abs(mu) > 1e-3, 1, 0)
+        fit <- lm.spike(y = as.numeric(sim$Y),
+                  X = sim$X,
+                  niter = 4000,                
+                  expected.model.size = config$s)
+        mu <- as.numeric(coef(fit)[-1])               
+        gamma <- as.numeric(inclusion.probabilities(fit)[-1])  
       }
-      
       # ------------------------
       # Compute metrics
       # ------------------------
@@ -138,7 +141,6 @@ for (config in configurations) {
     results <- append(results, list(metrics_summary))
   }
 }
-
 
 results <- bind_rows(results)
 write.csv(results, "DRI_results_other_methods.csv", row.names = FALSE)
