@@ -3,7 +3,6 @@
 # for Laplace Spike-and-Slab in High-Dimensional Linear Regression
 # with Rényi Divergence 
 #
-# Optimized: precompute XtX, YtX, and ridge mu_init in simulate()
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
 # ------------------------------------------------------------
