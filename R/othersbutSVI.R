@@ -35,7 +35,6 @@ number_of_simulations <- 1
 # =========================
 simulate <- function(n, p, s) {
   X <- matrix(rnorm(n * p), n, p)
-  colnames(X) <- paste0("V", seq_len(p))
   theta <- numeric(p); theta[sample.int(p, s)] <- runif(s, -3, 3)
   Y <- as.numeric(X %*% theta + rnorm(n))
   list(X = X, Y = Y, theta = theta)
