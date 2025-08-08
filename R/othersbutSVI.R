@@ -28,7 +28,7 @@ library(tictoc)
 # =========================
 # Constants
 # =========================
-number_of_simulations <- 1
+number_of_simulations <- 100
 
 # =========================
 # Simulation
