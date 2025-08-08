@@ -1,6 +1,6 @@
 # ------------------------------------------------------------
 # Metrics Summary for other Bayesian Methods (Excluding SVI): 
-# spikeslab, BoomSpikeSlab, sparsevb
+# spikeslab, varbvs, sparsevb
 #
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
@@ -21,14 +21,14 @@ library(spikeslab)
 library(glmnet)
 library(tidyr)
 library(dplyr)
-library(BoomSpikeSlab)
+library(varbvs)
 library(progress)
 library(tictoc)
 
 # =========================
 # Constants
 # =========================
-number_of_simulations <- 100
+number_of_simulations <- 1
 
 # =========================
 # Simulation
@@ -66,7 +66,7 @@ configurations <- list(
   list(name = "(iv)",   n = 300,  p = 450,   s = 20)
 )
 
-methods <- c("sparsevb", "spikeslab", "BoomSpikeSlab")
+methods <- c("sparsevb", "spikeslab", "varbvs")
 results <- list()
 
 # =========================
@@ -106,12 +106,19 @@ for (config in configurations) {
         
         fit <- spikeslab(x = sim$X,
                          y = sim$Y,
-                         verbose = FALSE, n.keep = 10)
-      
+                         verbose = FALSE)
         mu <- fit$bma # Bayesian Model Averaging (BMA) 
         gamma <- as.numeric(abs(mu) > 1e-3)
+      } 
+      
+      else if (method == "varbvs") {
+        fit <- varbvs(X = sim$X, Z = NULL,
+                         y = sim$Y, family = "gaussian", verbose = FALSE)
+        mu <- fit$beta #Beta: "Averaged" posterior mean regression coefficients
+        gamma <- fit$pip #Pip: "Averaged" posterior inclusion probabilities
         
       } 
+      
       metrics_list[[sim_idx]] <- compute_metrics(mu, gamma, sim$theta, sim$X, sim$Y)
     }
     
