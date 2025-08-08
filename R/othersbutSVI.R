@@ -106,7 +106,7 @@ for (config in configurations) {
       } else if (method == "spikeslab") {
         
         fit <- spikeslab(x = sim$X,
-                         y = sim$Y,
+                         y = sim$Y, bigp.smalln=TRUE,
                          verbose = FALSE)
         mu <- fit$bma # Bayesian Model Averaging (BMA) 
         gamma <- as.numeric(abs(mu) > 1e-3)
