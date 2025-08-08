@@ -106,8 +106,6 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   vr_bound_prev <- 0
 
   for (iter in 1:max_iter) {
-    # Map eta_gamma to gamma in (0,1)
-    gamma <- plogis(eta_gamma)
 
     grad_mu <- grad_sigma <- grad_gamma <- rep(0, p)
     log_ratios <- numeric(K)
@@ -126,9 +124,9 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
       z_samples[[k]] <- z_k
     }
 
-    # Normalized weights since exp(large numer) = NaN
-    log_ratios_centered <- log_ratios - max(log_ratios, na.rm = TRUE)
-    weights <- exp(log_ratios_centered)
+    # Normalized weights by dividing since exp(large number) = NaN
+    log_ratios_normalized <- (log_ratios / max(log_ratios, na.rm = TRUE))
+    weights <- exp(log_ratios_normalized)
     weights <- weights / sum(weights, na.rm = TRUE)
 
     # Gradients
@@ -139,22 +137,24 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
         if (z_k[i] == 1) {
           diff <- theta_k[i] - mu[i]
           s1 <- sigma1[i]
-          grad_mu[i]    <- grad_mu[i]    + weights[k] * (diff / (s1^2 + eps_safe))
-          grad_sigma[i] <- grad_sigma[i] + weights[k] * (((diff^2) - s1^2) / (s1^3 + eps_safe))
+          grad_mu[i]    <- grad_mu[i]    + weights[k] * (diff / (s1^2))
+          grad_sigma[i] <- grad_sigma[i] + weights[k] * (((diff^2) - s1^2) / (s1^3))
         }
         grad_gamma[i] <- grad_gamma[i] + weights[k] * ((z_k[i] / gamma[i]) - ((1 - z_k[i]) / (1 - gamma[i])))
       }
     }
 
     # Updates
+    # Different learning rates, the parameters have different scales and meanings
     mu     <- mu     + lr * grad_mu
     sigma1 <- sigma1 + lr * grad_sigma
-    grad_eta_gamma <- grad_gamma * gamma * (1 - gamma)
     gamma <- gamma + lr * grad_gamma #issue is that gamma needs to be in (0,1)
 
     # Bound
-    vr_bound <- (1 / (1 - a)) * (log(mean(exp(log_ratios_centered))) + max(log_ratios, na.rm = TRUE))
+    vr_bound <- (1 / (1 - a)) * (log(mean(exp(log_ratios_normalized))) + max(log_ratios, na.rm = TRUE))
     if (!is.finite(vr_bound)) vr_bound <- vr_bound_prev
+
+    #use entropy instead
     if (is.finite(vr_bound) && is.finite(vr_bound_prev) && abs(vr_bound - vr_bound_prev) < eps) break
     vr_bound_prev <- vr_bound
   }
@@ -231,6 +231,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
