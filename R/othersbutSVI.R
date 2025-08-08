@@ -105,9 +105,8 @@ for (config in configurations) {
         
       } else if (method == "spikeslab") {
         fit <- spikeslab(x = sim$X, y = as.numeric(sim$Y), verbose = FALSE)
-        coefs <- coef(fit)                 # includes intercept as first entry
-        mu <- as.numeric(coefs[-1])        # drop intercept
-        # spikeslab doesn't expose true PIPs; use a pragmatic proxy
+        coefs <- coef(fit)                 
+        mu <- as.numeric(coefs[-1])        
         gamma <- as.numeric(abs(mu) > 1e-3)
       } else if (method == "BoomSpikeSlab") {
         fit <- lm.spike(y = as.numeric(sim$Y),
