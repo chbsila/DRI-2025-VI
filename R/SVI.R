@@ -92,8 +92,8 @@ log_variational <- function(theta, mu, sigma1, gamma) {
 # SVI Algorithm
 # ============================================================
 svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
-                    alpha_h = 1.0, beta_h = 1.0,
-                    lr, K = 200, max_iter = 1000,
+                    alpha_h = 1.0, beta_h = 1.0, eta_mu, eta_sigma,
+                    eta_tau, K = 200, max_iter = 1000,
                     eps = 1e-7, verbose = TRUE, clip_gradients = TRUE) {
   n <- nrow(X)
   p <- ncol(X)
@@ -172,9 +172,9 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
     gamma_old <- gamma
 
     # ----- Updates -----
-    mu          <- mu + lr * grad_mu
-    log_sigma1  <- log_sigma1  + lr * grad_log_sigma
-    tau         <- tau + lr * grad_tau
+    mu          <- mu + eta_mu * grad_mu
+    log_sigma1  <- log_sigma1  + eta_sigma * grad_log_sigma
+    tau         <- tau + eta_tau * grad_tau
 
     # VR Bound  
     vr_bound <- (1 / (1 - a)) * (log(mean(exp(lr_fin - m))) + m)
@@ -265,6 +265,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
