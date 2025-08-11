@@ -47,7 +47,7 @@ simulate <- function(n, p, s) {
 # Laplace Density
 # ============================================================
 dlaplace <- function(x, lambda) {
-  return((1 / 2) * exp(-lambda * abs(x)))
+  return((lambda / 2) * exp(-lambda * abs(x)))
 }
 
 # ============================================================
@@ -225,6 +225,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
