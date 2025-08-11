@@ -28,14 +28,8 @@ library(tictoc)     # Run-time profiling
 library(stats)      # For dnorm, rnorm, dbinom
 
 # ============================================================
-# Parallel Setup
-# ============================================================
-registerDoMC(cores = parallel::detectCores() - 1)
-
-# ============================================================
 # Global Constants
 # ============================================================
-eps_safe <- 1e-7
 number_of_simulations <- 100
 
 # ============================================================
@@ -69,7 +63,7 @@ log_joint <- function(theta, z, Y, X, sigma2, lambda, w) {
 }
 
 # ============================================================
-# Log Variational Density: log q(theta, z)
+# Log Variational Density: log P_{\mu, \sigma, \gamma}(theta, z)
 # ============================================================
 log_variational <- function(theta, mu, sigma1, gamma) {
   log_q <- 0
@@ -96,10 +90,10 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   # Ridge initialization
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
-  gamma <- ifelse(abs(mu) > 1, 0.999, eps_safe) # We have 1-gamma in some denominators
+  gamma <- ifelse(abs(mu) > 0, 0.9, 0.1) 
 
   sigma1 <- rep(1, p)
-  alpha_h <- sum(gamma_init)
+  alpha_h <- sum(gamma)
   beta_h <- p - alpha_h
   w <- alpha_h / (alpha_h + beta_h)
 
@@ -231,6 +225,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
