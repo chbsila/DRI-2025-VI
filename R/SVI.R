@@ -69,7 +69,7 @@ log_variational <- function(theta, mu, sigma1, gamma) {
   log_q <- 0
   for (i in seq_along(theta)) {
     if (theta[i] == 0) {
-      log_q <- log_q + log((1 - gamma[i]) + gamma[i] * dnorm(0, mu[i], sigma1[i]))
+      log_q <- log_q + log((1 - gamma[i]))
     } else {
       log_q <- log_q + log(gamma[i] * dnorm(theta[i], mu[i], sigma1[i]))
     }
@@ -225,6 +225,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
