@@ -93,99 +93,104 @@ log_variational <- function(theta, mu, sigma1, gamma) {
 # ============================================================
 svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
                     alpha_h = 1.0, beta_h = 1.0,
-                    lr = 0.01, K = 100, max_iter = 100,
-                    eps = 1e-7, verbose = TRUE) {
+                    lr, K = 200, max_iter = 1000,
+                    eps = 1e-7, verbose = TRUE, clip_gradients = TRUE) {
   n <- nrow(X)
   p <- ncol(X)
 
   # Ridge initialization
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
-  gamma <- ifelse(abs(mu) > 0, 0.9, 0.1) 
+  gamma <- ifelse(abs(mu) > 0, 0.9, 0.1)
 
   # Reparameterization
-  tau <- qlogis(pmin(pmax(gamma, 1e-12), 1 - 1e-12))
-  
-  sigma1 <- rep(1, p)
+  tau <- qlogis(gamma)   # logit(gamma)
+  log_sigma1 <- rep(0, p)  # sd = exp(0) = 1
   alpha_h <- sum(gamma)
-  beta_h <- p - alpha_h
+  beta_h  <- p - alpha_h
   w <- alpha_h / (alpha_h + beta_h)
 
-  vr_bound_prev <- 0
+  vr_bound_prev <- -Inf
 
   for (iter in 1:max_iter) {
 
-    grad_mu <- grad_sigma <- grad_tau <- rep(0, p)
+    grad_mu <- grad_log_sigma <- grad_tau <- rep(0, p)
     log_ratios <- numeric(K)
     theta_samples <- vector("list", K)
     z_samples <- vector("list", K)
 
     gamma  <- plogis(tau)
-    gamma  <- pmin(pmax(gamma, 1e-12), 1 - 1e-12)  # clamp
+    sigma1 <- exp(log_sigma1)                     
 
     for (k in 1:K) {
       z_k <- rbinom(p, size = 1, prob = gamma)
-      theta_k <- sapply(1:p, function(i) {
-        if (!is.na(z_k[i]) && z_k[i] == 1) {
-          rnorm(1, mu[i], sigma1[i])
-        } else {
-          0
-        }
-      })
+      theta_k <- ifelse(z_k == 1,
+                        rnorm(p, mu, sigma1),
+                        0)
 
-      log_p <- log_joint(theta_k, z_k, Y, X, sigma2, prior_scale, w)
-      log_q <- log_variational(theta_k, mu, sigma1, gamma)
-      log_ratios[k] <- (log_p - log_q) * (1 - a)
+      lp <- log_joint(theta_k, z_k, Y, X, sigma2, prior_scale, w)
+      lq <- log_variational(theta_k, z_k, mu, sigma1, gamma) 
+      log_ratios[k] <- (lp - lq) * (1 - a)
 
       theta_samples[[k]] <- theta_k
-      z_samples[[k]] <- z_k
+      z_samples[[k]]     <- z_k
     }
 
-    # Stable weights
-    log_ratios_normalized <- (log_ratios - max(log_ratios, na.rm = TRUE))
-    weights <- exp(log_ratios_normalized)
-    weights <- weights / sum(weights, na.rm = TRUE)
+    # ----- Build weights from finite ratios only -----
+    finite_mask <- is.finite(log_ratios)
+    if (!any(finite_mask)) {
+      warning("All log_ratios are non-finite; try smaller lr or K.")
+      break
+    }
+      
+    lr_fin <- log_ratios[finite_mask]
+    m <- max(lr_fin)
+    weights_fin <- exp(lr_fin - m)
+    weights_fin <- weights_fin / sum(weights_fin)
+    k_idx <- which(finite_mask)
 
-    # Gradients
-    for (k in 1:K) {
+    # Gradients 
+    for (t in seq_along(k_idx)) {
+      k <- k_idx[t]
+      w_k <- weights_fin[t]
       theta_k <- theta_samples[[k]]
-      z_k <- z_samples[[k]]
+      z_k     <- z_samples[[k]]
+
       for (i in 1:p) {
-        g_i <- pmin(pmax(gamma[i], 1e-12), 1 - 1e-12)  # clamp
+        g_i <- pmin(pmax(gamma[i], 1e-12), 1 - 1e-12)
         if (!is.na(z_k[i]) && z_k[i] == 1) {
           diff <- theta_k[i] - mu[i]
           s1   <- sigma1[i]
-          grad_mu[i]    <- grad_mu[i]    + weights[k] * (diff / (s1^2))
-          grad_sigma[i] <- grad_sigma[i] + weights[k] * (((diff^2) - s1^2) / (s1^3))
+          grad_mu[i]        <- grad_mu[i]        + w_k * (diff / (s1^2))
+          grad_log_sigma[i] <- grad_log_sigma[i] + w_k * (((diff^2) - s1^2) / (s1^3)) * s1
         }
-        grad_tau[i] <- grad_tau[i] + weights[k] *
+        grad_tau[i] <- grad_tau[i] + w_k *
           ((z_k[i] / g_i) - ((1 - z_k[i]) / (1 - g_i))) * g_i * (1 - g_i)
       }
     }
-
+ 
     gamma_old <- gamma
-                        
-    # Updates
-    mu     <- mu     + lr * grad_mu
-    sigma1 <- sigma1 + lr * grad_sigma
-    tau    <- tau    + lr * grad_tau
 
-    # Bound
-    vr_bound <- (1 / (1 - a)) *
-      (log(mean(exp(log_ratios_normalized))) + max(log_ratios, na.rm = TRUE))
+    # ----- Updates -----
+    mu          <- mu + lr * grad_mu
+    log_sigma1  <- log_sigma1  + lr * grad_log_sigma
+    tau         <- tau + lr * grad_tau
+
+    # VR Bound  
+    vr_bound <- (1 / (1 - a)) * (log(mean(exp(lr_fin - m))) + m)
     if (!is.finite(vr_bound)) vr_bound <- vr_bound_prev
-
     gamma  <- plogis(tau)
-    gamma  <- pmin(pmax(gamma, 1e-12), 1 - 1e-12)  # clamp
     gamma_new <- gamma
-                        
-    # Entropy as stopping criterion
-    if (delta(gamma_new, gamma_old) < eps) break
+
+    # ----- Entropy stopping -----
+    ent_change <- delta(gamma_new, gamma_old)
+    if (is.finite(ent_change) && ent_change < eps) break
     vr_bound_prev <- vr_bound
   }
-                        
-  list(mu = mu, sigma1 = sigma1, gamma = gamma)
+
+  list(mu = mu, sigma1 = exp(log_sigma1), gamma = gamma)
 }
+
 
 # ============================================================
 # Metrics Computation
@@ -260,6 +265,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
