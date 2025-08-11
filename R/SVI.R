@@ -43,6 +43,15 @@ simulate <- function(n, p, s) {
   list(X = X, Y = Y, theta = theta)
 }
 
+entropy <- function(z) {
+  z <- pmin(pmax(z, 1e-10), 1 - 1e-10)
+  -z * log2(z) - (1 - z) * log2(1 - z)
+}
+
+delta <- function(g_old, g_new) {
+  max(abs(entropy(g_old) - entropy(g_new)))
+}
+
 # ============================================================
 # Laplace Density
 # ============================================================
@@ -78,7 +87,7 @@ log_variational <- function(theta, mu, sigma1, gamma) {
 }
 
 # ============================================================
-# SVI Algorithm with logit reparameterization for gamma
+# SVI Algorithm 
 # ============================================================
 svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
                     alpha_h = 1.0, beta_h = 1.0,
@@ -92,6 +101,9 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
   gamma <- ifelse(abs(mu) > 0, 0.9, 0.1) 
 
+  # Reparameterization
+  tau <- qlogis(gamma)
+  
   sigma1 <- rep(1, p)
   alpha_h <- sum(gamma)
   beta_h <- p - alpha_h
@@ -101,10 +113,12 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
 
   for (iter in 1:max_iter) {
 
-    grad_mu <- grad_sigma <- grad_gamma <- rep(0, p)
+    grad_mu <- grad_sigma <- grad_tau <- rep(0, p)
     log_ratios <- numeric(K)
     theta_samples <- vector("list", K)
     z_samples <- vector("list", K)
+
+    gamma  <- plogis(tau)
 
     for (k in 1:K) {
       z_k <- rbinom(p, size = 1, prob = gamma)
@@ -119,7 +133,7 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
     }
 
     # Normalized weights by dividing since exp(large number) = NaN
-    log_ratios_normalized <- (log_ratios / max(log_ratios, na.rm = TRUE))
+    log_ratios_normalized <- (log_ratios - max(log_ratios, na.rm = TRUE))
     weights <- exp(log_ratios_normalized)
     weights <- weights / sum(weights, na.rm = TRUE)
 
@@ -130,27 +144,34 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
       for (i in 1:p) {
         if (z_k[i] == 1) {
           diff <- theta_k[i] - mu[i]
-          s1 <- sigma1[i]
+          s1   <- sigma1[i]
           grad_mu[i]    <- grad_mu[i]    + weights[k] * (diff / (s1^2))
           grad_sigma[i] <- grad_sigma[i] + weights[k] * (((diff^2) - s1^2) / (s1^3))
         }
-        grad_gamma[i] <- grad_gamma[i] + weights[k] * ((z_k[i] / gamma[i]) - ((1 - z_k[i]) / (1 - gamma[i])))
+        grad_tau[i] <- grad_tau[i] + weights[k] *
+        ((z_k[i] / gamma[i]) - ((1 - z_k[i]) / (1 - gamma[i]))) * gamma[i] * (1 - gamma[i])
       }
     }
 
+    gamma_old <- gamma
+                        
     # Updates
-    # Different learning rates, the parameters have different scales and meanings
     mu     <- mu     + lr * grad_mu
     sigma1 <- sigma1 + lr * grad_sigma
-    gamma <- gamma + lr * grad_gamma #issue is that gamma needs to be in (0,1)
+    tau <- tau + lr * grad_tau
 
     # Bound
     vr_bound <- (1 / (1 - a)) * (log(mean(exp(log_ratios_normalized))) + max(log_ratios, na.rm = TRUE))
     if (!is.finite(vr_bound)) vr_bound <- vr_bound_prev
 
-    #use entropy instead
-    if (is.finite(vr_bound) && is.finite(vr_bound_prev) && abs(vr_bound - vr_bound_prev) < eps) break
+    gamma  <- plogis(tau)
+
+    gamma_new <- gamma
+                        
+    # Entropy as stopping criterion
+    if (delta(gamma_new, gamma_old) < eps) break
     vr_bound_prev <- vr_bound
+ 
   }
                         
   list(mu = mu, sigma1 = sigma1, gamma = gamma)
@@ -225,6 +246,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
