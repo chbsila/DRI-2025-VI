@@ -75,18 +75,25 @@ log_joint <- function(theta, z, Y, X, sigma2, lambda, w) {
 # ============================================================
 # Log Variational Density
 # ============================================================
-log_variational <- function(theta, mu, sigma1, gamma) {
-  log_q <- 0
-  for (i in seq_along(theta)) {
-    g_i <- pmin(pmax(gamma[i], 1e-12), 1 - 1e-12)  # clamp
-    if (theta[i] == 0) {
-      log_q <- log_q + log(1 - g_i)
-    } else {
-      log_q <- log_q + log(g_i * dnorm(theta[i], mu[i], sigma1[i]))
-    }
-  }
-  log_q
+log_variational <- function(theta, z, mu, sigma1, gamma) {
+  s1 <- pmax(sigma1, 1e-12)
+  g  <- pmin(pmax(gamma, 1e-12), 1 - 1e-12)
+
+  # impossible: z=0 but theta!=0 (delta spike)
+  if (any(z == 0 & theta != 0)) return(-Inf)
+
+  # z=0 contributes log(1-g)
+  term0 <- sum((z == 0) * log1p(-g))
+
+  # z=1 contributes log g + log N
+  idx1 <- which(z == 1L)
+  term1 <- if (length(idx1)) {
+    sum(log(g[idx1]) + dnorm(theta[idx1], mu[idx1], s1[idx1], log = TRUE))
+  } else 0
+
+  term0 + term1
 }
+
 
 # ============================================================
 # SVI Algorithm
@@ -94,7 +101,7 @@ log_variational <- function(theta, mu, sigma1, gamma) {
 svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
                     alpha_h = 1.0, beta_h = 1.0, eta_mu, eta_sigma,
                     eta_tau, K = 200, max_iter = 1000,
-                    eps = 1e-7, verbose = TRUE, clip_gradients = TRUE) {
+                    eps = 1e-7, verbose = TRUE) {
   n <- nrow(X)
   p <- ncol(X)
 
@@ -265,6 +272,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
