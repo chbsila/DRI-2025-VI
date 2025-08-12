@@ -203,7 +203,7 @@ compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
   n <- nrow(X)
   posterior_mean <- mu * gamma
   pos_TR <- as.numeric(theta != 0)
-  pos <- as.numeric(gamma > 0.8)
+  pos <- as.numeric(gamma > 0.5)
   TPR <- sum((pos == 1) & (pos_TR == 1)) / sum(pos_TR)
   FDR <- sum((pos == 1) & (pos_TR == 0)) / max(sum(pos), 1)
   L2 <- sqrt(sum((posterior_mean - theta)^2))
@@ -269,6 +269,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
