@@ -108,7 +108,7 @@ svi.fit <- function(X, Y, a, prior_scale = 1.0, sigma2 = 1.0,
   # Ridge initialization
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu <- as.vector(coef(ridge_fit))[-1]; mu[is.na(mu)] <- 0
-  gamma <- ifelse(abs(mu) > 0, 0.9, 0.1)
+  gamma <- ifelse(abs(mu) > 0, 0.1, 0.1) #I found that this works somehow
 
   # Reparameterization
   tau <- qlogis(gamma)   # logit(gamma)
@@ -272,6 +272,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
