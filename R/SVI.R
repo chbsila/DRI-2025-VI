@@ -246,7 +246,7 @@ for (config in configurations) {
                             .combine = bind_rows) %do% {
       pb$tick()
       sim <- sims[[sim_idx]]
-      fit <- suppressWarnings(svi.fit(sim$X, sim$Y, a, prior_scale = 1))
+      fit <- suppressWarnings(svi.fit(sim$X, sim$Y, a, prior_scale = 50)) # Choose high lambda 
       compute_metrics(fit$mu, fit$sigma1, fit$gamma, sim$theta, sim$X, sim$Y)
     }
     
@@ -269,6 +269,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
