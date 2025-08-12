@@ -245,7 +245,7 @@ for (config in configurations) {
                            format = "[:bar] :percent ETA: :eta")
     
     metrics_list <- foreach(sim_idx = 1:number_of_simulations,
-                            .combine = bind_rows) %do% {
+                            .combine = bind_rows) %dopar% {
       pb$tick()
       sim <- sims[[sim_idx]]
       fit <- suppressWarnings(svi.fit(sim$X, sim$Y, a, prior_scale = 50)) # Choose high lambda 
@@ -271,6 +271,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
