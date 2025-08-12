@@ -145,7 +145,7 @@ delta <- function(g_old, g_new) {
 rvi.fit <- function(X, Y, XtX, YtX, mu_init, a, prior_scale = 1) {
   p <- ncol(X)
   mu <- mu_init
-  gamma <- ifelse(abs(mu) > 1, 1, 0)
+  gamma <- ifelse(abs(mu) > 0.01, 0.9, 0.1)
   sigma1 <- rep(1, p)
   
   upper_bound = max(mu) + max(sigma1)
