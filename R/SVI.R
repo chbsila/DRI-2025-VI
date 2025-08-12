@@ -8,7 +8,7 @@
 # ------------------------------------------------------------
 
 
-# Note: We found that choosing higher hyperprior lamda yields better TPR 
+# Note: We found that choosing higher hyperprior lambda yields better TPR => you need to talk about this in the paper
 
 # ============================================================
 # Set Working Directory
@@ -269,6 +269,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
