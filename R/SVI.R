@@ -17,6 +17,7 @@ save_dir <- "~/Desktop/Other Methods"
 setwd(save_dir)
 cat("Saving all results to:", getwd(), "\n")
 
+
 # ============================================================
 # Libraries
 # ============================================================
@@ -34,6 +35,7 @@ library(stats)      # For dnorm, rnorm, dbinom
 # Global Constants
 # ============================================================
 number_of_simulations <- 100
+registerDoMC(cores = parallel::detectCores() - 1)
 
 # ============================================================
 # Simulation Function
@@ -269,6 +271,7 @@ for (config in configurations) {
 results <- bind_rows(results)
 write.csv(results, "SVI_DRI_results.csv")
 toc()
+
 
 
 
