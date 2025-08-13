@@ -1,89 +1,101 @@
-# ------------------------------------------------------------
+# ============================================================
 # Coordinate Ascent Variational Inference (CAVI) Algorithm
 # for Laplace Spike-and-Slab in High-Dimensional Linear Regression
-# with Rényi Divergence 
+# with Rényi Divergence
 #
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
-# ------------------------------------------------------------
+# ============================================================
 
-# ============================================================
+# ------------------------------------------------------------
 # Set Working Directory
-# ============================================================
-save_dir <- "~/Desktop/DRI"   
+# ------------------------------------------------------------
+save_dir <- "~/Desktop/DRI"
 setwd(save_dir)
 cat("Saving all results to:", getwd(), "\n")
 
-# ============================================================
+# ------------------------------------------------------------
 # Libraries
-# ============================================================
+# ------------------------------------------------------------
 library(ggplot2)
 library(foreach)
 library(glmnet)
 library(tidyr)
 library(dplyr)
 library(doMC)
-library(tictoc)     # Run-time profiling
+library(tictoc)     # Runtime profiling
 
-# ============================================================
+# ------------------------------------------------------------
 # Parallel Setup
-# ============================================================
+# ------------------------------------------------------------
 registerDoMC(cores = parallel::detectCores() - 1)
 
-# ============================================================
+# ------------------------------------------------------------
 # Global Constants
-# ============================================================
+# ------------------------------------------------------------
 eps_safe <- 1e-7
 number_of_simulations <- 100
 
-# ============================================================
+# ------------------------------------------------------------
 # Simulation Function (Optimized)
-# ============================================================
+# ------------------------------------------------------------
 simulate <- function(n, p, s) {
   X <- matrix(rnorm(n * p, mean = 0), n, p)
   theta <- numeric(p)
   theta[sample.int(p, s)] <- runif(s, -3, 3)
   Y <- X %*% theta + rnorm(n)
+
   XtX <- crossprod(X)
   YtX <- crossprod(Y, X)
+
   ridge_fit <- glmnet(X, Y, alpha = 0, lambda = 0.1, intercept = FALSE)
   mu_init <- as.vector(coef(ridge_fit))[-1]
   mu_init[is.na(mu_init)] <- 0
+
   list(X = X, Y = Y, theta = theta, XtX = XtX, YtX = YtX, mu_init = mu_init)
 }
 
-# ============================================================
-# Safe Helper
-# ============================================================
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
 safe_sum <- function(x) if (length(x) == 0) 0 else sum(x)
 
-# ============================================================
-# Helper Functions
-# ============================================================
+entropy <- function(z) {
+  z <- pmin(pmax(z, 1e-10), 1 - 1e-10)
+  -z * log2(z) - (1 - z) * log2(1 - z)
+}
+
+delta <- function(g_old, g_new) {
+  max(abs(entropy(g_old) - entropy(g_new)))
+}
+
+# ------------------------------------------------------------
+# Gradient Components
+# ------------------------------------------------------------
 A_i_mu <- function(mu_i, mu, sigma1, gamma, lambda, i, p, XtX, YtX) {
   sum_j <- if (p > 1) safe_sum(gamma[-i] * mu[-i] * XtX[-i, i]) else 0
-  smoothed_grad <- mu_i / sqrt(mu_i^2 + eps_safe)
-  term <- -YtX[i] + mu_i * XtX[i, i] + sum_j + lambda * smoothed_grad
+  sm_grad <- mu_i / sqrt(mu_i^2 + eps_safe)
+  term <- -YtX[i] + mu_i * XtX[i, i] + sum_j + lambda * sm_grad
   (term^2) * sigma1[i]^2
 }
 
 A_i_sigma <- function(sigma_i, mu, sigma1, gamma, lambda, i, p, XtX, YtX) {
   sum_j <- if (p > 1) safe_sum(gamma[-i] * mu[-i] * XtX[-i, i]) else 0
-  smoothed_grad <- mu[i] / sqrt(mu[i]^2 + eps_safe)
-  term <- -YtX[i] + mu[i] * XtX[i, i] + sum_j + lambda * smoothed_grad
+  sm_grad <- mu[i] / sqrt(mu[i]^2 + eps_safe)
+  term <- -YtX[i] + mu[i] * XtX[i, i] + sum_j + lambda * sm_grad
   (term^2) * sigma_i^2
 }
 
 B_i_mu <- function(mu_i, sigma1, lambda, i, XtX) {
   denom <- sqrt(mu_i^2 + eps_safe)
-  second_deriv <- (1 / denom) - (mu_i^2) / (denom^3)
-  XtX[i, i] * sigma1[i]^2 - 1 + lambda * sigma1[i]^2 * second_deriv
+  sec_deriv <- (1 / denom) - (mu_i^2) / (denom^3)
+  XtX[i, i] * sigma1[i]^2 - 1 + lambda * sigma1[i]^2 * sec_deriv
 }
 
 B_i_sigma <- function(sigma_i, mu, lambda, i, XtX) {
   denom <- sqrt(mu[i]^2 + eps_safe)
-  second_deriv <- (1 / denom) - (mu[i]^2) / (denom^3)
-  XtX[i, i] * sigma_i^2 - 1 + lambda * sigma_i^2 * second_deriv
+  sec_deriv <- (1 / denom) - (mu[i]^2) / (denom^3)
+  XtX[i, i] * sigma_i^2 - 1 + lambda * sigma_i^2 * sec_deriv
 }
 
 C_i_mu <- function(mu_i, mu, sigma1, gamma, i, XtX) {
@@ -100,17 +112,22 @@ C_i_sigma <- function(mu, sigma1, gamma, i, XtX) {
   mu[i]^2 * sum_k
 }
 
+# ------------------------------------------------------------
+# g and kappa Functions
+# ------------------------------------------------------------
 g_func_mu <- function(mu_i, mu, sigma1, gamma, lambda, a, i, XtX, YtX) {
   sum_j <- if (length(mu) > 1) safe_sum(gamma[-i] * mu[-i] * XtX[-i, i]) else 0
   exponent <- (a - 1) * (-YtX[i] * mu_i + 0.5 * mu_i^2 * XtX[i, i] +
-                           mu_i * sum_j + lambda * sqrt(mu_i^2 + eps_safe) - log(sigma1[i]))
+                           mu_i * sum_j + lambda * sqrt(mu_i^2 + eps_safe) -
+                           log(sigma1[i]))
   exp(exponent)
 }
 
 g_func_sigma <- function(sigma_i, mu, sigma1, gamma, lambda, a, i, XtX, YtX) {
   sum_j <- if (length(mu) > 1) safe_sum(gamma[-i] * mu[-i] * XtX[-i, i]) else 0
   exponent <- (a - 1) * (-YtX[i] * mu[i] + 0.5 * mu[i]^2 * XtX[i, i] +
-                           mu[i] * sum_j + lambda * sqrt(mu[i]^2 + eps_safe) - log(sigma_i))
+                           mu[i] * sum_j + lambda * sqrt(mu[i]^2 + eps_safe) -
+                           log(sigma_i))
   exp(exponent)
 }
 
@@ -119,7 +136,9 @@ kappa_mu <- function(mu_i, mu, sigma1, gamma, lambda, a, p, i, XtX, YtX) {
   Ai <- A_i_mu(mu_i, mu, sigma1, gamma, lambda, i, p, XtX, YtX)
   Bi <- B_i_mu(mu_i, sigma1, lambda, i, XtX)
   Ci <- C_i_mu(mu_i, mu, sigma1, gamma, i, XtX)
-  g_val * (1 + ((a - 1)^2 / 2) * Ai + ((a - 1) / 2) * Bi + ((a - 1)^2 / 2) * Ci)
+  g_val * (1 + ((a - 1)^2 / 2) * Ai +
+              ((a - 1) / 2) * Bi +
+              ((a - 1)^2 / 2) * Ci)
 }
 
 kappa_sigma <- function(sigma_i, mu, sigma1, gamma, lambda, a, p, i, XtX, YtX) {
@@ -127,128 +146,143 @@ kappa_sigma <- function(sigma_i, mu, sigma1, gamma, lambda, a, p, i, XtX, YtX) {
   Ai <- A_i_sigma(sigma_i, mu, sigma1, gamma, lambda, i, p, XtX, YtX)
   Bi <- B_i_sigma(sigma_i, mu, lambda, i, XtX)
   Ci <- C_i_sigma(mu, sigma1, gamma, i, XtX)
-  g_val * (1 + ((a - 1)^2 / 2) * Ai + ((a - 1) / 2) * Bi + ((a - 1)^2 / 2) * Ci)
+  g_val * (1 + ((a - 1)^2 / 2) * Ai +
+              ((a - 1) / 2) * Bi +
+              ((a - 1)^2 / 2) * Ci)
 }
 
-entropy <- function(z) {
-  z <- pmin(pmax(z, 1e-10), 1 - 1e-10)
-  -z * log2(z) - (1 - z) * log2(1 - z)
-}
-
-delta <- function(g_old, g_new) {
-  max(abs(entropy(g_old) - entropy(g_new)))
-}
-
-# ============================================================
-# CAVI Algorithm (Optimized: no XtX/YtX recompute)
-# ============================================================
+# ------------------------------------------------------------
+# CAVI Main Loop
+# ------------------------------------------------------------
 rvi.fit <- function(X, Y, XtX, YtX, mu_init, a, prior_scale = 1) {
   p <- ncol(X)
   mu <- mu_init
   gamma <- ifelse(abs(mu) > 0.01, 0.9, 0.1)
   sigma1 <- rep(1, p)
-  
-  upper_bound = max(mu) + max(sigma1)
-  lower_bound = min(mu) - max(sigma1)
-  sigma_upper_bound = max(sigma1) + 1
+
+  upper_bound <- max(mu) + max(sigma1)
+  lower_bound <- min(mu) - max(sigma1)
+  sigma_upper_bound <- max(sigma1) + 1
+
   alpha_h <- sum(gamma)
-  beta_h <- p - alpha_h
-  
+  beta_h  <- p - alpha_h
   update_order <- order(abs(mu), decreasing = TRUE)
+
   k <- 1; deltav <- 1
   eps <- 1e-7
   max_iterations <- 100
-  
+
   while (k < max_iterations && deltav > eps) {
     gamma_old <- gamma
+
     for (i in update_order) {
       mu[i] <- tryCatch(
         optimize(f = function(m) kappa_mu(m, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
-                 interval = c(lower_bound, upper_bound))$minimum, error = function(e) mu[i])
+                 interval = c(lower_bound, upper_bound))$minimum,
+        error = function(e) mu[i])
+
       sigma1[i] <- tryCatch(
         optimize(f = function(s) kappa_sigma(s, mu, sigma1, gamma, prior_scale, a, p, i, XtX, YtX),
-                 interval = c(1e-7, sigma_upper_bound))$minimum, error = function(e) sigma1[i])
-      
-      Gamma_i <- log(alpha_h / beta_h) + log(sqrt(pi) * sigma1[i] * prior_scale / sqrt(2)) +
-        YtX[i] * mu[i] - mu[i] * sum((XtX[i, -i]) * gamma[-i] * mu[-i]) -
+                 interval = c(1e-7, sigma_upper_bound))$minimum,
+        error = function(e) sigma1[i])
+
+      Gamma_i <- log(alpha_h / beta_h) +
+        log(sqrt(pi) * sigma1[i] * prior_scale / sqrt(2)) +
+        YtX[i] * mu[i] -
+        mu[i] * sum((XtX[i, -i]) * gamma[-i] * mu[-i]) -
         0.5 * XtX[i, i] * (sigma1[i]^2 + mu[i]^2) -
-        prior_scale * sigma1[i] * sqrt(2 / pi) * exp(-mu[i]^2 / (2 * sigma1[i]^2)) -
+        prior_scale * sigma1[i] * sqrt(2 / pi) *
+          exp(-mu[i]^2 / (2 * sigma1[i]^2)) -
         prior_scale * mu[i] * (1 - 2 * pnorm(-mu[i] / sigma1[i])) + 0.5
+
       gamma[i] <- 1 / (1 + exp(-Gamma_i))
     }
-    upper_bound = max(mu) + max(sigma1)
-    lower_bound = min(mu) - max(sigma1)
-    sigma_upper_bound = max(sigma1) + 1
-    alpha_h <- sum(gamma); beta_h <- p - alpha_h
+
+    upper_bound <- max(mu) + max(sigma1)
+    lower_bound <- min(mu) - max(sigma1)
+    sigma_upper_bound <- max(sigma1) + 1
+
+    alpha_h <- sum(gamma)
+    beta_h  <- p - alpha_h
+
     k <- k + 1
     deltav <- delta(gamma_old, gamma)
   }
+
   list(mu = mu, sigma1 = sigma1, gamma = gamma)
 }
 
-# ============================================================
+# ------------------------------------------------------------
 # Metrics Computation
-# ============================================================
+# ------------------------------------------------------------
 compute_metrics <- function(mu, sigma1, gamma, theta, X, Y) {
   n <- nrow(X)
   posterior_mean <- mu * gamma
   pos_TR <- as.numeric(theta != 0)
-  pos <- as.numeric(gamma > 0.5) 
-  TPR <- sum((pos == 1) & (pos_TR == 1)) / sum(pos_TR)
-  FDR <- sum((pos == 1) & (pos_TR == 0)) / max(sum(pos), 1)
-  L2 <- sqrt(sum((posterior_mean - theta)^2))
+  pos    <- as.numeric(gamma > 0.5)
+
+  TPR  <- sum((pos == 1) & (pos_TR == 1)) / sum(pos_TR)
+  FDR  <- sum((pos == 1) & (pos_TR == 0)) / max(sum(pos), 1)
+  L2   <- sqrt(sum((posterior_mean - theta)^2))
   MSPE <- sqrt(sum((X %*% posterior_mean - Y)^2) / n)
+
   data.frame(TPR, FDR, L2, MSPE)
 }
 
-# ============================================================
+# ------------------------------------------------------------
 # Experiment Configurations
-# ============================================================
+# ------------------------------------------------------------
 a_values <- c(1.01, 1.1, 1.2, 1.3, 1.5, 2, 3, 5, 100)
-configurations <- list(list(name = "(i)",  n = 100,  p = 200,   s = 10), 
-                       list(name = "(ii)",   n = 400,  p = 1000,  s = 40), 
-                       list(name = "(iii)",  n = 200,  p = 800,   s = 5),
-                       list(name = "(iv)",   n = 300,  p = 450,  s = 20)
+
+configurations <- list(
+  list(name = "(i)",   n = 100, p = 200,  s = 10),
+  list(name = "(ii)",  n = 400, p = 1000, s = 40),
+  list(name = "(iii)", n = 200, p = 800,  s = 5),
+  list(name = "(iv)",  n = 300, p = 450,  s = 20)
 )
 
-# ============================================================
+# ------------------------------------------------------------
 # Parallel Run
-# ============================================================
+# ------------------------------------------------------------
 results <- list()
 tic("Total runtime")
 
 for (config in configurations) {
   cat("\n=== Running configuration:", config$name, "===\n")
-  
+
   sims <- vector("list", number_of_simulations)
   for (i in 1:number_of_simulations) {
     sims[[i]] <- simulate(config$n, config$p, config$s)
   }
-  
+
   for (a in a_values) {
     cat("\nAlpha:", a, "\n")
-    metrics_list <- foreach(
-      sim_idx = 1:number_of_simulations,
-      .combine = bind_rows,
-      .packages = c("glmnet", "dplyr")
-    ) %dopar% {
+
+    metrics_list <- foreach(sim_idx = 1:number_of_simulations,
+                            .combine = bind_rows,
+                            .packages = c("glmnet", "dplyr")) %dopar% {
       sim <- sims[[sim_idx]]
       fit <- suppressWarnings(
         rvi.fit(sim$X, sim$Y, sim$XtX, sim$YtX, sim$mu_init, a, prior_scale = 1)
       )
       compute_metrics(fit$mu, fit$sigma1, fit$gamma, sim$theta, sim$X, sim$Y)
     }
-    
+
     metrics_summary <- metrics_list %>%
       summarise(
-        TPR_mean = mean(TPR, na.rm = TRUE), TPR_SD = sd(TPR, na.rm = TRUE),
-        FDR_mean = mean(FDR, na.rm = TRUE), FDR_SD = sd(FDR, na.rm = TRUE),
-        L2_mean  = mean(L2, na.rm = TRUE),  L2_SD  = sd(L2, na.rm = TRUE),
-        MSPE_mean= mean(MSPE, na.rm = TRUE), MSPE_SD= sd(MSPE, na.rm = TRUE)
+        TPR_mean  = mean(TPR,  na.rm = TRUE), TPR_SD  = sd(TPR,  na.rm = TRUE),
+        FDR_mean  = mean(FDR,  na.rm = TRUE), FDR_SD  = sd(FDR,  na.rm = TRUE),
+        L2_mean   = mean(L2,   na.rm = TRUE), L2_SD   = sd(L2,   na.rm = TRUE),
+        MSPE_mean = mean(MSPE, na.rm = TRUE), MSPE_SD = sd(MSPE, na.rm = TRUE)
       ) %>%
-      mutate(config = config$name, a = a, number_of_simulations = number_of_simulations)
-    
-    write.csv(metrics_summary, paste0("results_", a, "_", config$name, ".csv"), row.names = FALSE)
+      mutate(config = config$name,
+             a = a,
+             number_of_simulations = number_of_simulations)
+
+    write.csv(metrics_summary,
+              paste0("results_", a, "_", config$name, ".csv"),
+              row.names = FALSE)
+
     results <- append(results, list(metrics_summary))
   }
 }
