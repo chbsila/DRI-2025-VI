@@ -1,7 +1,6 @@
 # Bayesian Variable Selection with Rényi Divergence
 
-This repository contains the implementation and evaluation of **Bayesian variable selection methods** for **sparse high-dimensional linear regression**.  
-The focus is on **Laplace spike-and-slab priors** and **Rényi divergence–based variational inference**, with comparisons to other state-of-the-art Bayesian methods.
+This repository contains the implementation and evaluation of **Bayesian variable selection methods** for **sparse high-dimensional linear regression**. The focus is on **Laplace spike-and-slab priors** and **Rényi divergence–based variational inference**, with comparisons to other state-of-the-art Bayesian methods.
 
 The work supports the [DRI 2025] project by Chadi Bsila, Kevin Wang, and Annie Tang.
 
