@@ -29,6 +29,30 @@ The work supports the [DRI 2025] project by Chadi Bsila, Kevin Wang, and Annie T
   - [`varbvs`](https://cran.r-project.org/web/packages/varbvs/index.html)
 - Produces comparable metrics to SVI and CAVI runs.
 
+## Experimental Configurations
+
+We evaluate methods across **four sparse high-dimensional regression setups**:
+
+| Config ID | (n, p, s)        | Description |
+|-----------|-----------------|-------------|
+| (i)       | (100, 200, 10)  | Small sample, moderate dimension, 10 true signals |
+| (ii)      | (400, 1000, 40) | Larger sample, high dimension, 40 true signals |
+| (iii)     | (200, 800, 5)   | Moderate sample, high dimension, extremely sparse |
+| (iv)      | (300, 450, 20)  | Moderate sample & dimension, 20 true signals |
+
+Where:
+- **n** = number of observations
+- **p** = number of predictors
+- **s** = number of nonzero coefficients
+
+## α Values
+
+We explore both **mass-covering** and **zero-forcing** regimes:
+
+- **Mass-covering** (`α < 1`): `0.01, 0.10, 0.25, 0.50, 0.90`
+- **Zero-forcing / standard KL limit** (`α ≥ 1`):
+  - For **CAVI**: `1.01, 1.10, 1.20, 1.30, 1.50, 2, 3, 5, 100`
+  - For **SVI**: same as CAVI, plus mass-covering set above
 
 ## Output Metrics
 
@@ -37,5 +61,5 @@ Metrics include:
 
 - **TPR** – True Positive Rate 
 - **FDR** – False Discovery Rate
-- **L2** – \ell_2 error between estimated and true coefficients
+- **L2** – \(\ell_2\) error between estimated and true coefficients
 - **MSPE** – Mean Squared Prediction Error
