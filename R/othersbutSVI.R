@@ -73,7 +73,7 @@ configurations <- list(
   list(name = "(iv)",   n = 300,  p = 450,  s = 20)
 )
 
-methods <- c("sparsevb", "spikeslab", "varbvs")
+methods <- c("sparsevb", "spikeslab", "varbvs", "lasso")
 results <- list()
 
 # ------------------------------------------------------------
