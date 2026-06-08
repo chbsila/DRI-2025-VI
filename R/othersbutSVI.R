@@ -4,6 +4,8 @@
 #   spikeslab: https://cran.r-project.org/web/packages/spikeslab/index.html
 #   varbvs:    https://cran.r-project.org/web/packages/varbvs/index.html
 #   sparsevb:  https://cran.r-project.org/web/packages/sparsevb/index.html
+#   lasso: https://cran.r-project.org/web/packages/glmnet/index.html
+
 #
 # Authors: Chadi Bsila, Kevin Wang, Annie Tang
 # Supported by: DRI 2025
@@ -126,6 +128,13 @@ for (config in configurations) {
                       verbose = FALSE)
         mu <- fit$beta
         gamma <- fit$pip
+      }
+      
+      else if (method == "lasso") {
+        fit <- cv.glmnet(x = sim$X, y=sim$Y, alpha = 1)
+        coef_mat <- coef(fit, s = "lambda.min")
+        mu <- as.numeric(coef_mat[-1])
+        gamma <- as.numeric(abs(mu) > 0)
       }
 
       metrics_list[[sim_idx]] <- compute_metrics(mu, gamma, sim$theta, sim$X, sim$Y)
